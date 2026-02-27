@@ -1,0 +1,430 @@
+import { chromium } from 'playwright';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { resolve } from 'path';
+import config from './config.js';
+import logger from './logger.js';
+
+const SESSION_DIR = config.paths.session;
+const LOGIN_URL = 'https://www.ameba.jp/login';
+const EDITOR_URL = 'https://blog.ameba.jp/ucs/entry/srventryinsertinput.do';
+
+/**
+ * ブラウザを起動（セッション付き）
+ */
+async function launchBrowser(headless = true) {
+  mkdirSync(SESSION_DIR, { recursive: true });
+
+  const browser = await chromium.launch({
+    headless,
+    args: ['--disable-blink-features=AutomationControlled'],
+  });
+
+  const context = await browser.newContext({
+    storageState: existsSync(resolve(SESSION_DIR, 'state.json'))
+      ? resolve(SESSION_DIR, 'state.json')
+      : undefined,
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    viewport: { width: 1280, height: 800 },
+    locale: 'ja-JP',
+  });
+
+  return { browser, context };
+}
+
+/**
+ * アメブロにログイン
+ */
+async function login(context) {
+  const page = await context.newPage();
+
+  try {
+    // まずブログエディタに直接アクセスしてみる（セッションが有効なら開ける）
+    logger.info('セッション確認中...');
+    await page.goto(EDITOR_URL, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+
+    const checkUrl = page.url();
+    if (checkUrl.includes('entry') || checkUrl.includes('blog.ameba.jp')) {
+      logger.info('既にログイン済みです');
+      await page.close();
+      return true;
+    }
+
+    // ログインが必要 → ログインページへ
+    logger.info('アメブロにログイン中...');
+    await page.goto(LOGIN_URL, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.waitForTimeout(2000);
+
+    // ameba.jp/login から「ログイン」リンクをクリック
+    const currentUrl = page.url();
+    if (currentUrl.includes('www.ameba.jp')) {
+      const loginLink = page.locator('a:has-text("ログイン")').first();
+      if (await loginLink.isVisible()) {
+        logger.info('認証ページへ遷移中...');
+        await loginLink.click();
+        await page.waitForURL((url) => {
+          const href = url.href;
+          return href.includes('auth.user.ameba.jp') || href.includes('/home');
+        }, { timeout: 15000 });
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(3000);
+      }
+    }
+
+    // ログイン済みの場合（/homeにリダイレクトされた）
+    const afterClickUrl = page.url();
+    if (afterClickUrl.includes('/home') || afterClickUrl.includes('blog.ameba.jp')) {
+      logger.info('既にログイン済みです（セッション有効）');
+      await saveSession(context);
+      await page.close();
+      return true;
+    }
+
+    // auth.user.ameba.jp/signin のフォームで認証
+    logger.info(`認証ページ: ${page.url()}`);
+    await page.waitForSelector('#accountId', { timeout: 15000 });
+    await page.fill('#accountId', config.ameblo.id);
+    await page.fill('#password', config.ameblo.password);
+    await page.waitForTimeout(1000);
+    await page.click('button[type="submit"]');
+
+    // ログイン完了を待機
+    await page.waitForURL((url) => {
+      const href = url.href;
+      return !href.includes('signin') && !href.includes('/login') && !href.includes('auth.user.ameba.jp');
+    }, { timeout: 30000 }).catch(() => {});
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(2000);
+
+    const afterUrl = page.url();
+    logger.info(`ログイン後URL: ${afterUrl}`);
+
+    if (afterUrl.includes('signin') || afterUrl.includes('auth.user.ameba.jp/connect')) {
+      throw new Error('ログインに失敗しました。ID/パスワードを確認してください。');
+    }
+
+    await saveSession(context);
+    logger.info('ログイン成功 - セッションを保存しました');
+    await page.close();
+    return true;
+  } catch (err) {
+    await page.close();
+    throw err;
+  }
+}
+
+async function saveSession(context) {
+  const state = await context.storageState();
+  const statePath = resolve(SESSION_DIR, 'state.json');
+  const { writeFileSync } = await import('fs');
+  writeFileSync(statePath, JSON.stringify(state));
+}
+
+/**
+ * エディタ画面のモーダルダイアログを閉じる
+ */
+async function dismissModals(page) {
+  try {
+    // エディタ更新モーダル等を閉じる
+    const modal = page.locator('dialog.spui-SemiModal[open]');
+    if (await modal.isVisible().catch(() => false)) {
+      logger.info('モーダルダイアログを閉じています...');
+      // モーダル内の閉じるボタンやOKボタンを探す
+      const closeBtn = modal.locator('button:has-text("とじる"), button:has-text("OK"), button:has-text("閉じる"), button[aria-label="閉じる"]').first();
+      if (await closeBtn.isVisible().catch(() => false)) {
+        await closeBtn.click();
+      } else {
+        // JavaScriptでモーダルを閉じる
+        await page.evaluate(() => {
+          const dialogs = document.querySelectorAll('dialog[open]');
+          dialogs.forEach(d => d.close());
+        });
+      }
+      await page.waitForTimeout(1000);
+      logger.info('モーダルを閉じました');
+    }
+
+    // オーバーレイ要素も削除
+    await page.evaluate(() => {
+      const overlays = document.querySelectorAll('._3h4C5, .spui-SemiModal');
+      overlays.forEach(el => {
+        if (el.tagName === 'DIALOG') {
+          el.close();
+        }
+      });
+    }).catch(() => {});
+  } catch (err) {
+    logger.debug(`モーダル閉じ処理: ${err.message}`);
+  }
+}
+
+/**
+ * 写真パネルを開く（アップロード前の準備）
+ */
+async function openPhotoPanel(page) {
+  await page.locator('#sidepanel-accessoryTab-photos').click({ force: true });
+  await page.waitForTimeout(1000);
+  await page.locator('#js-photo-tabButton').click({ force: true }).catch(() => {});
+  await page.waitForTimeout(500);
+  logger.info('写真パネルを開きました');
+}
+
+/**
+ * 画像をアメブロにアップロード
+ * APIレスポンスをインターセプトして画像URLを取得
+ */
+async function uploadImage(page, imagePath) {
+  if (!imagePath || !existsSync(imagePath)) {
+    logger.warn(`画像ファイルが見つかりません: ${imagePath}`);
+    return null;
+  }
+
+  try {
+    logger.info(`画像アップロード中: ${imagePath}`);
+
+    // APIレスポンスのPromiseを先に設定（アップロード前に）
+    const responsePromise = page.waitForResponse(
+      (resp) => resp.url().includes('/api/editor/image/upload') && resp.status() === 200,
+      { timeout: 30000 }
+    );
+
+    // ファイル入力にセット（アップロードトリガー）
+    await page.locator('#js-input-files').setInputFiles(imagePath);
+
+    // APIレスポンスを待機・解析
+    const response = await responsePromise;
+    const data = await response.json();
+    const originalUrl = data.imageInfo?.originalUrl || null;
+
+    if (originalUrl) {
+      logger.info(`画像アップロード完了: ${originalUrl}`);
+    } else {
+      logger.warn('画像URLの取得に失敗');
+    }
+
+    await page.waitForTimeout(2000);
+    return originalUrl;
+  } catch (err) {
+    logger.warn(`画像アップロードエラー: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * カバー画像（アイキャッチ）を設定
+ * アップロード済み画像から選択するモーダルを操作
+ */
+async function setCoverImage(page) {
+  try {
+    logger.info('カバー画像を設定中...');
+
+    // 「画像を選択する」ボタンをクリック（#js-coverSelect）
+    const selectBtn = page.locator('#js-coverSelect');
+    if (!await selectBtn.isVisible().catch(() => false)) {
+      logger.warn('カバー画像選択ボタンが見つかりません');
+      return false;
+    }
+    await selectBtn.click();
+    await page.waitForTimeout(2000);
+
+    // カバー設定モーダルが開くのを待つ
+    const modal = page.locator('.CoverSelectModal__body');
+    await modal.waitFor({ state: 'visible', timeout: 10000 });
+
+    // 画像グリッドの最初の画像をクリック（最新アップロードが自動選択されている場合もある）
+    const gridItem = modal.locator('.CoverEditor__imageItem').first();
+    if (await gridItem.isVisible().catch(() => false)) {
+      await gridItem.click({ force: true }).catch(() => {});
+      await page.waitForTimeout(1000);
+    }
+
+    // 「カバーに設定する」ボタンをクリック
+    const confirmBtn = page.locator('button:has-text("カバーに設定する")');
+    await confirmBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await confirmBtn.click();
+    await page.waitForTimeout(2000);
+    logger.info('カバー画像を設定しました');
+    return true;
+  } catch (err) {
+    logger.warn(`カバー画像設定エラー: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * 画像付きHTMLを組み立て
+ */
+function buildPostHtml(article, images) {
+  let html = '';
+
+  // アイキャッチ画像（本文先頭に挿入）
+  if (images.eyecatchUrl) {
+    html += `<p><img src="${images.eyecatchUrl}" alt="${article.title}" /></p>\n`;
+  }
+
+  // 本文を追加
+  html += article.bodyHtml;
+
+  // 各h2見出しの直後に図解画像を挿入
+  for (const diagram of images.diagramUrls || []) {
+    if (!diagram.url) continue;
+    const imgTag = `\n<p><img src="${diagram.url}" alt="${diagram.h2}" /></p>`;
+    const pattern = new RegExp(
+      `(<h2[^>]*id="heading-${diagram.index}"[^>]*>.*?</h2>)`,
+      's'
+    );
+    html = html.replace(pattern, `$1${imgTag}`);
+  }
+
+  return html;
+}
+
+/**
+ * 記事を投稿
+ */
+export async function postToAmeblo(article, imageFiles) {
+  logger.info(`=== アメブロ投稿開始: "${article.title}" ===`);
+
+  if (config.dryRun) {
+    logger.info('[ドライラン] 実際の投稿はスキップされます');
+    return { success: true, dryRun: true, title: article.title };
+  }
+
+  const { browser, context } = await launchBrowser();
+
+  try {
+    // ログイン
+    await login(context);
+
+    const page = await context.newPage();
+    await page.goto(EDITOR_URL, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.waitForTimeout(3000);
+
+    // CKEditorの読み込みを待つ
+    await page.waitForSelector('#cke_amebloeditor', { timeout: 15000 });
+    logger.info('エディタの読み込み完了');
+
+    // モーダルダイアログが表示されていたら閉じる（エディタ更新通知など）
+    await dismissModals(page);
+
+    // --- 画像アップロード ---
+    const imageUrls = { eyecatchUrl: null, diagramUrls: [] };
+    const hasImages = imageFiles.eyecatchPath || (imageFiles.diagrams || []).some(d => d.imagePath);
+
+    if (hasImages) {
+      // 写真パネルを開く（ファイル入力を有効にする）
+      await openPhotoPanel(page);
+    }
+
+    if (imageFiles.eyecatchPath) {
+      imageUrls.eyecatchUrl = await uploadImage(page, imageFiles.eyecatchPath);
+    }
+
+    for (const diagram of imageFiles.diagrams || []) {
+      if (diagram.imagePath) {
+        const url = await uploadImage(page, diagram.imagePath);
+        imageUrls.diagramUrls.push({
+          index: diagram.index,
+          h2: diagram.h2,
+          url,
+        });
+      }
+    }
+
+    // --- カバー画像設定（アップロード済み画像から選択） ---
+    if (imageUrls.eyecatchUrl) {
+      await setCoverImage(page);
+    }
+
+    // --- HTML組み立て ---
+    const postHtml = buildPostHtml(article, imageUrls);
+
+    // --- タイトル入力 ---
+    logger.info('タイトルを入力中...');
+    await page.fill('input[name="entry_title"]', article.title);
+
+    // --- 本文入力（CKEditor API経由） ---
+    logger.info('本文を入力中...');
+
+    // CKEditor APIで直接HTMLを設定（モーダル干渉を回避）
+    await page.evaluate((html) => {
+      if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances.amebloeditor) {
+        CKEDITOR.instances.amebloeditor.setData(html);
+      }
+    }, postHtml);
+    await page.waitForTimeout(2000);
+
+    // CKEditor APIが使えなかった場合のフォールバック
+    const editorContent = await page.evaluate(() => {
+      if (typeof CKEDITOR !== 'undefined' && CKEDITOR.instances.amebloeditor) {
+        return CKEDITOR.instances.amebloeditor.getData();
+      }
+      return '';
+    });
+
+    if (!editorContent || editorContent.length < 100) {
+      logger.info('CKEditor APIでの設定に失敗、HTML表示モードで入力します...');
+      // モーダルを再度閉じる
+      await dismissModals(page);
+      // HTML表示モードに切り替え（force: trueでクリック）
+      await page.locator('#js-editorModeButton--source').click({ force: true });
+      await page.waitForTimeout(1000);
+      const sourceTextarea = page.locator('textarea.cke_source');
+      await sourceTextarea.waitFor({ state: 'visible', timeout: 10000 });
+      await sourceTextarea.fill(postHtml);
+      await page.waitForTimeout(1000);
+      // 通常表示に戻す
+      await page.locator('#js-editorModeButton--wysiwyg').click({ force: true });
+      await page.waitForTimeout(2000);
+    }
+
+    logger.info('本文入力完了');
+
+    // --- 投稿ボタン ---
+    logger.info('記事を投稿中...');
+    // モーダルを閉じてから投稿
+    await dismissModals(page);
+    await page.locator('button.js-submitButton:has-text("投稿する")').click({ force: true });
+
+    // 投稿完了を待機
+    await page.waitForTimeout(5000);
+
+    // 確認ダイアログが出た場合の対応
+    const confirmBtn = page.locator('button:has-text("OK"), button:has-text("投稿する")').last();
+    if (await confirmBtn.isVisible().catch(() => false)) {
+      await confirmBtn.click({ force: true });
+      await page.waitForTimeout(5000);
+    }
+
+    const finalUrl = page.url();
+    logger.info(`投稿完了: ${finalUrl}`);
+
+    // セッション保存
+    await saveSession(context);
+
+    await browser.close();
+    return { success: true, url: finalUrl, title: article.title };
+  } catch (err) {
+    logger.error(`投稿エラー: ${err.message}`);
+    await browser.close();
+    return { success: false, error: err.message, title: article.title };
+  }
+}
+
+/**
+ * ログインテスト用
+ */
+export async function testLogin() {
+  const { browser, context } = await launchBrowser(false);
+  try {
+    await login(context);
+    logger.info('ログインテスト成功');
+    await browser.close();
+    return true;
+  } catch (err) {
+    logger.error(`ログインテスト失敗: ${err.message}`);
+    await browser.close();
+    return false;
+  }
+}
