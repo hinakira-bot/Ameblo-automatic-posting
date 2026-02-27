@@ -122,7 +122,11 @@ export async function runPipeline(options = {}) {
       onProgress?.({ message: '[ドライラン] 投稿スキップ', progress: 95 });
     } else {
       postResult = await postToAmeblo(article, imageFiles);
-      onProgress?.({ message: '投稿完了', progress: 95 });
+      if (postResult.success) {
+        onProgress?.({ message: '投稿完了', progress: 95 });
+      } else {
+        onProgress?.({ message: `投稿エラー: ${postResult.error || '不明'}`, progress: 95 });
+      }
     }
 
     // === STEP 5: ステータス更新 ===
@@ -154,10 +158,15 @@ export async function runPipeline(options = {}) {
       });
     }
 
-    onProgress?.({ step: 'done', message: '完了', progress: 100 });
+    if (postResult.success) {
+      onProgress?.({ step: 'done', message: '完了', progress: 100 });
+    } else {
+      onProgress?.({ step: 'error', message: `エラー: ${postResult.error || '不明'}`, progress: 95 });
+    }
 
     return {
       success: postResult.success,
+      error: postResult.error || undefined,
       keyword: keyword || description.slice(0, 40),
       title: article.title,
       elapsed,

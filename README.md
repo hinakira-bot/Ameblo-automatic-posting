@@ -49,7 +49,43 @@ npm run dev
 
 ---
 
-## VPS へのデプロイ（販売・常時稼働向け）
+## Docker でのセットアップ（推奨）
+
+VPS に SSH 接続後、以下の1コマンドで全自動インストールできます：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hinakira-bot/Ameblo-automatic-posting/main/install.sh | bash
+```
+
+対話形式で Gemini APIキー・アメブロID/パスワードを入力すれば、自動でセットアップが完了します。
+
+### Docker 手動セットアップ
+
+```bash
+# クローン
+git clone https://github.com/hinakira-bot/Ameblo-automatic-posting.git /opt/ameblo-tool
+cd /opt/ameblo-tool
+
+# .env を作成して設定を入力
+cp .env.example .env
+nano .env
+
+# 起動
+docker compose up -d --build
+```
+
+### Docker コマンド一覧
+
+```bash
+docker compose logs -f        # ログ確認
+docker compose restart         # 再起動
+docker compose down            # 停止
+git pull && docker compose up -d --build  # アップデート
+```
+
+---
+
+## VPS へのデプロイ（Docker なし）
 
 ### 推奨VPS
 

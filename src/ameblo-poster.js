@@ -400,14 +400,19 @@ export async function postToAmeblo(article, imageFiles) {
     const finalUrl = page.url();
     logger.info(`投稿完了: ${finalUrl}`);
 
-    // セッション保存
-    await saveSession(context);
+    // セッション保存（失敗しても投稿自体は成功扱い）
+    try {
+      await saveSession(context);
+    } catch (sessionErr) {
+      logger.warn(`セッション保存エラー（投稿は成功）: ${sessionErr.message}`);
+    }
 
     await browser.close();
     return { success: true, url: finalUrl, title: article.title };
   } catch (err) {
     logger.error(`投稿エラー: ${err.message}`);
-    await browser.close();
+    logger.error(err.stack);
+    try { await browser.close(); } catch { /* ignore */ }
     return { success: false, error: err.message, title: article.title };
   }
 }
