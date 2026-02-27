@@ -57,7 +57,16 @@ function onProgress({ step, message, progress, keyword, title }) {
 /** パイプラインを開始 */
 export async function startPipeline(options = {}) {
   if (state.running) {
-    throw new Error('パイプラインは既に実行中です');
+    // 10分以上経過している場合は強制リセット（ハングアップ対策）
+    const elapsed = state.startedAt
+      ? (Date.now() - new Date(state.startedAt).getTime()) / 1000
+      : 0;
+    if (elapsed > 600) {
+      state.running = false;
+      addLog('warn', '前回のパイプラインがタイムアウトしました。強制リセットします。');
+    } else {
+      throw new Error('パイプラインは既に実行中です');
+    }
   }
 
   // 状態リセット
@@ -87,7 +96,6 @@ export async function startPipeline(options = {}) {
       state.step = result.success ? 'done' : 'error';
       state.progress = result.success ? 100 : state.progress;
       state.result = result;
-      state.running = false;
 
       addLog(
         result.success ? 'info' : 'error',
@@ -99,9 +107,11 @@ export async function startPipeline(options = {}) {
     } catch (err) {
       state.step = 'error';
       state.result = { success: false, error: err.message };
-      state.running = false;
       addLog('error', `致命的エラー: ${err.message}`);
       broadcast({ type: 'done' });
+    } finally {
+      // 成功・失敗・例外いずれの場合も必ず running を解除
+      state.running = false;
     }
   })();
 }
