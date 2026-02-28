@@ -46,6 +46,8 @@ export default function SettingsPage() {
   const [screenshot, setScreenshot] = useState(null);
   const [sessionStarting, setSessionStarting] = useState(false);
   const [typeInput, setTypeInput] = useState('');
+  const [uploadMsg, setUploadMsg] = useState('');
+  const fileInputRef = useRef(null);
   const imgRef = useRef(null);
   const pollingRef = useRef(null);
 
@@ -118,6 +120,31 @@ export default function SettingsPage() {
     } catch {}
     setSessionState({ active: false, status: 'idle', message: '', hasSession: sessionState.hasSession });
     setScreenshot(null);
+  };
+
+  const handleSessionUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadMsg('');
+    try {
+      const text = await file.text();
+      const res = await fetch('/api/session/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionData: text }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setUploadMsg(data.message);
+        setSessionState(prev => ({ ...prev, hasSession: true }));
+      } else {
+        setUploadMsg(data.error || 'アップロード失敗');
+      }
+    } catch (err) {
+      setUploadMsg('エラー: ' + err.message);
+    }
+    // input をリセット
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleTypeSubmit = async (e) => {
@@ -328,7 +355,7 @@ export default function SettingsPage() {
         {/* ログインセッション */}
         <Section title="ログインセッション">
           <div className="text-sm text-gray-600 mb-3">
-            アメブロへのログインセッションを取得します。reCAPTCHAが表示された場合は、下の画面でチェックボックスをクリックして手動で解決できます。
+            アメブロへのログインセッションを管理します。セッションが有効な間は自動投稿時にログイン不要です。
           </div>
 
           {/* セッション状態 */}
@@ -354,6 +381,13 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {/* アップロード成功/エラー */}
+          {uploadMsg && (
+            <div className={`rounded-lg px-4 py-3 text-sm mb-3 ${uploadMsg.includes('エラー') || uploadMsg.includes('失敗') ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-green-50 border border-green-200 text-green-800'}`}>
+              {uploadMsg}
+            </div>
+          )}
+
           {/* エラーメッセージ */}
           {sessionState.status === 'error' && !sessionState.active && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800 mb-3">
@@ -361,16 +395,42 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* 開始/終了ボタン */}
-          {!sessionState.active ? (
-            <button
-              onClick={handleSessionStart}
-              disabled={sessionStarting}
-              className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {sessionStarting ? '起動中...' : 'セッション取得開始'}
-            </button>
-          ) : (
+          {/* 方法1: セッションファイルをアップロード */}
+          <div className="bg-gray-50 rounded-lg p-4 mb-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">方法1: ローカルPCからセッションをアップロード（推奨）</h3>
+            <ol className="text-xs text-gray-600 space-y-1 mb-3 list-decimal list-inside">
+              <li>ローカルPCでツールを起動: <code className="bg-gray-200 px-1 rounded">npm run test:login</code></li>
+              <li>ブラウザが開くのでアメブロにログイン</li>
+              <li>生成された <code className="bg-gray-200 px-1 rounded">data/session/state.json</code> を下からアップロード</li>
+            </ol>
+            <div className="flex items-center gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleSessionUpload}
+                className="text-xs"
+              />
+            </div>
+          </div>
+
+          {/* 方法2: サーバー上で対話型ログイン */}
+          <div className="bg-gray-50 rounded-lg p-4 mb-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">方法2: サーバー上で対話型ログイン</h3>
+            <p className="text-xs text-gray-600 mb-3">
+              サーバーのブラウザでログインを試みます。reCAPTCHAの画像認証が無限に続く場合は方法1をお使いください。
+            </p>
+
+            {/* 開始/終了ボタン */}
+            {!sessionState.active ? (
+              <button
+                onClick={handleSessionStart}
+                disabled={sessionStarting}
+                className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {sessionStarting ? '起動中...' : '対話型ログイン開始'}
+              </button>
+            ) : (
             <>
               {/* ステータスメッセージ */}
               {sessionState.message && (
@@ -458,7 +518,8 @@ export default function SettingsPage() {
                 セッションを閉じる
               </button>
             </>
-          )}
+            )}
+          </div>
         </Section>
 
         {/* APIキー・認証情報 */}
