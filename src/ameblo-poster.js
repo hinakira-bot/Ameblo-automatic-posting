@@ -326,6 +326,29 @@ async function setCoverImage(page) {
 /**
  * 画像付きHTMLを組み立て
  */
+/**
+ * <p>タグ内の複数文を1文ずつ別の<p>タグに分割する
+ * AIが1つの<p>に複数文を入れてしまった場合の保険処理
+ */
+function splitSentencesIntoParagraphs(html) {
+  return html.replace(/<p>((?:(?!<img|<ul|<ol|<table)[^<])+)<\/p>/g, (match, content) => {
+    // 画像やリストを含むpタグはそのまま
+    const trimmed = content.trim();
+    if (!trimmed) return match;
+
+    // 「。」で分割して、それぞれを<p>タグで囲む
+    // ただし「。」が1つ以下なら分割不要
+    const sentences = trimmed.split(/(?<=。)\s*/);
+    if (sentences.length <= 1) return match;
+
+    return sentences
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
+      .map(s => `<p>${s}</p>`)
+      .join('\n');
+  });
+}
+
 function buildPostHtml(article, images) {
   let html = '';
 
@@ -334,8 +357,8 @@ function buildPostHtml(article, images) {
     html += `<p><img src="${images.eyecatchUrl}" alt="${article.title}" /></p>\n`;
   }
 
-  // 本文を追加
-  html += article.bodyHtml;
+  // 本文を追加（1文1段落に変換）
+  html += splitSentencesIntoParagraphs(article.bodyHtml);
 
   // 各h2見出しの直後に図解画像を挿入
   for (const diagram of images.diagramUrls || []) {
