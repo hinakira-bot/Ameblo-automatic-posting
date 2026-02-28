@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const FREQUENCY_OPTIONS = [
   { value: 'daily1', label: '毎日1回' },
@@ -36,10 +36,117 @@ export default function SettingsPage() {
   const [hour1, setHour1] = useState(9);
   const [hour2, setHour2] = useState(15);
 
+  // 対話型セッション用
+  const [sessionState, setSessionState] = useState({
+    active: false,
+    status: 'idle',
+    message: '',
+    hasSession: false,
+  });
+  const [screenshot, setScreenshot] = useState(null);
+  const [sessionStarting, setSessionStarting] = useState(false);
+  const imgRef = useRef(null);
+  const pollingRef = useRef(null);
+
   useEffect(() => {
     fetchSettings();
     fetchCredentials();
+    fetchSessionState();
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
   }, []);
+
+  // セッションがactiveの間、スクリーンショットをポーリング
+  useEffect(() => {
+    if (sessionState.active) {
+      const poll = async () => {
+        try {
+          const [ssRes, stateRes] = await Promise.all([
+            fetch('/api/session/screenshot'),
+            fetch('/api/session'),
+          ]);
+          const ssData = await ssRes.json();
+          const stData = await stateRes.json();
+          if (ssData.image) setScreenshot(ssData.image);
+          setSessionState(stData);
+          // 成功 or エラーで停止
+          if (stData.status === 'success' || stData.status === 'error' || !stData.active) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+        } catch {}
+      };
+      poll(); // 初回即時
+      pollingRef.current = setInterval(poll, 1500);
+      return () => {
+        if (pollingRef.current) clearInterval(pollingRef.current);
+      };
+    }
+  }, [sessionState.active]);
+
+  const fetchSessionState = async () => {
+    try {
+      const res = await fetch('/api/session');
+      const data = await res.json();
+      setSessionState(data);
+    } catch {}
+  };
+
+  const handleSessionStart = async () => {
+    setSessionStarting(true);
+    setScreenshot(null);
+    try {
+      const res = await fetch('/api/session', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        setSessionState({ active: true, status: 'ready', message: data.message || '', hasSession: data.hasSession });
+      } else {
+        setSessionState(prev => ({ ...prev, status: 'error', message: data.error || 'エラー' }));
+      }
+    } catch (err) {
+      setSessionState(prev => ({ ...prev, status: 'error', message: err.message }));
+    } finally {
+      setSessionStarting(false);
+    }
+  };
+
+  const handleSessionClose = async () => {
+    try {
+      await fetch('/api/session', { method: 'DELETE' });
+    } catch {}
+    setSessionState({ active: false, status: 'idle', message: '', hasSession: sessionState.hasSession });
+    setScreenshot(null);
+  };
+
+  const handleScreenshotClick = useCallback(async (e) => {
+    if (!imgRef.current || !sessionState.active) return;
+    const rect = imgRef.current.getBoundingClientRect();
+    const scaleX = 1280 / rect.width;
+    const scaleY = 800 / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    try {
+      await fetch('/api/session/click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x, y }),
+      });
+      // クリック後すぐにスクリーンショット更新
+      setTimeout(async () => {
+        try {
+          const [ssRes, stRes] = await Promise.all([
+            fetch('/api/session/screenshot'),
+            fetch('/api/session'),
+          ]);
+          const ssData = await ssRes.json();
+          const stData = await stRes.json();
+          if (ssData.image) setScreenshot(ssData.image);
+          setSessionState(stData);
+        } catch {}
+      }, 500);
+    } catch {}
+  }, [sessionState.active]);
 
   const fetchSettings = async () => {
     try {
@@ -74,7 +181,6 @@ export default function SettingsPage() {
     setCredSaving(true);
     setCredMessage('');
 
-    // 空文字のフィールドは送らない（既存値維持）
     const payload = {};
     for (const [key, val] of Object.entries(credForm)) {
       if (val.trim()) payload[key] = val.trim();
@@ -95,12 +201,8 @@ export default function SettingsPage() {
 
       if (res.ok) {
         setCredMessage('APIキーを更新しました');
-        setCredForm({
-          geminiApiKey: '',
-          amebloId: '',
-          amebloPassword: '',
-        });
-        fetchCredentials(); // マスク表示を更新
+        setCredForm({ geminiApiKey: '', amebloId: '', amebloPassword: '' });
+        fetchCredentials();
         setTimeout(() => setCredMessage(''), 3000);
       } else {
         const data = await res.json();
@@ -117,9 +219,7 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage('');
 
-    // cron式を構築
     const cron = buildCronSimple({ frequency, hour1, hour2 });
-
     const updates = {
       'article.minLength': settings.article.minLength,
       'article.maxLength': settings.article.maxLength,
@@ -130,7 +230,6 @@ export default function SettingsPage() {
       'posting.dryRun': settings.posting.dryRun,
     };
 
-    // 画像生成モデル設定
     if (settings.imageModel) {
       updates['imageModel'] = settings.imageModel;
     }
@@ -143,14 +242,14 @@ export default function SettingsPage() {
       });
 
       if (res.ok) {
-        setMessage('✅ 設定を保存しました');
+        setMessage('設定を保存しました');
         setTimeout(() => setMessage(''), 3000);
       } else {
         const data = await res.json();
-        setMessage('❌ ' + (data.error || '保存に失敗しました'));
+        setMessage(data.error || '保存に失敗しました');
       }
     } catch (err) {
-      setMessage('❌ エラー: ' + err.message);
+      setMessage('エラー: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -181,6 +280,100 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold text-gray-900 mb-6">設定</h1>
 
       <div className="space-y-8">
+        {/* ログインセッション */}
+        <Section title="ログインセッション">
+          <div className="text-sm text-gray-600 mb-3">
+            アメブロへのログインセッションを取得します。reCAPTCHAが表示された場合は、下の画面でチェックボックスをクリックして手動で解決できます。
+          </div>
+
+          {/* セッション状態 */}
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-sm font-medium text-gray-700">状態:</span>
+            {sessionState.hasSession ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                <span className="w-2 h-2 rounded-full bg-green-500" />
+                セッション保存済み
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                <span className="w-2 h-2 rounded-full bg-gray-400" />
+                未取得
+              </span>
+            )}
+          </div>
+
+          {/* 成功メッセージ */}
+          {sessionState.status === 'success' && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-800 mb-3">
+              {sessionState.message}
+            </div>
+          )}
+
+          {/* エラーメッセージ */}
+          {sessionState.status === 'error' && !sessionState.active && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800 mb-3">
+              {sessionState.message}
+            </div>
+          )}
+
+          {/* 開始/終了ボタン */}
+          {!sessionState.active ? (
+            <button
+              onClick={handleSessionStart}
+              disabled={sessionStarting}
+              className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {sessionStarting ? '起動中...' : 'セッション取得開始'}
+            </button>
+          ) : (
+            <>
+              {/* ステータスメッセージ */}
+              {sessionState.message && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800 mb-3">
+                  {sessionState.message}
+                </div>
+              )}
+
+              {/* スクリーンショット（クリック可能） */}
+              {screenshot && (
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 mb-1">
+                    画面をクリックして操作できます（reCAPTCHAのチェック、ログインボタンのクリック等）
+                  </p>
+                  <div
+                    className="border-2 border-blue-300 rounded-lg overflow-hidden cursor-crosshair relative"
+                    style={{ maxWidth: '100%' }}
+                  >
+                    <img
+                      ref={imgRef}
+                      src={`data:image/jpeg;base64,${screenshot}`}
+                      alt="ブラウザ画面"
+                      onClick={handleScreenshotClick}
+                      className="w-full h-auto block"
+                      draggable={false}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ローディング（スクリーンショット未取得時） */}
+              {!screenshot && sessionState.status === 'starting' && (
+                <div className="border-2 border-gray-200 rounded-lg p-12 text-center text-gray-400 mb-3">
+                  <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-3"></div>
+                  ブラウザを起動中...
+                </div>
+              )}
+
+              <button
+                onClick={handleSessionClose}
+                className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+              >
+                セッションを閉じる
+              </button>
+            </>
+          )}
+        </Section>
+
         {/* APIキー・認証情報 */}
         <Section title="APIキー・認証情報">
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800 mb-2">
@@ -336,7 +529,7 @@ export default function SettingsPage() {
           )}
 
           <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm text-gray-600">
-            📅 {cronDescription}
+            {cronDescription}
           </div>
         </Section>
 
