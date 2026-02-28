@@ -10,6 +10,8 @@ export default function KeywordsPage() {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   useEffect(() => {
     fetchKeywords();
@@ -62,6 +64,42 @@ export default function KeywordsPage() {
     }
   };
 
+  const handleExport = () => {
+    window.location.href = '/api/keywords/export';
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/keywords/import', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setImportResult(data);
+        fetchKeywords();
+      } else {
+        setImportResult({ error: data.error });
+      }
+    } catch (err) {
+      setImportResult({ error: err.message });
+    } finally {
+      setImporting(false);
+      // ファイル入力をリセット
+      e.target.value = '';
+    }
+  };
+
   const filtered = filter === 'all'
     ? keywords
     : keywords.filter((k) => k.status === filter);
@@ -70,13 +108,57 @@ export default function KeywordsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">キーワード管理</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
-        >
-          ＋ 追加
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleExport}
+            className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+            title="CSVエクスポート"
+          >
+            CSV出力
+          </button>
+          <label className={`bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : ''}`}>
+            {importing ? '読込中...' : 'CSV取込'}
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleImport}
+              className="hidden"
+              disabled={importing}
+            />
+          </label>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+          >
+            ＋ 追加
+          </button>
+        </div>
       </div>
+
+      {/* インポート結果表示 */}
+      {importResult && (
+        <div className={`mb-4 p-4 rounded-lg text-sm ${importResult.error ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              {importResult.error ? (
+                <span>エラー: {importResult.error}</span>
+              ) : (
+                <span>
+                  インポート完了 — {importResult.imported}件追加
+                  {importResult.skipped > 0 && `、${importResult.skipped}件スキップ（重複）`}
+                  {importResult.errors?.length > 0 && `、${importResult.errors.length}件エラー`}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setImportResult(null)}
+              className="text-gray-400 hover:text-gray-600 cursor-pointer ml-4"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* フィルター */}
       <div className="flex gap-2 mb-4">
