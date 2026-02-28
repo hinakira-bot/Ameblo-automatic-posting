@@ -9,14 +9,28 @@ const LOGIN_URL = 'https://auth.user.ameba.jp/signin';
 const EDITOR_URL = 'https://blog.ameba.jp/ucs/entry/srventryinsertinput.do';
 
 /**
- * ブラウザを起動（セッション付き）
+ * ブラウザを起動（セッション付き・ボット検出回避）
  */
 async function launchBrowser(headless = true) {
   mkdirSync(SESSION_DIR, { recursive: true });
 
   const browser = await chromium.launch({
     headless,
-    args: ['--disable-blink-features=AutomationControlled'],
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-infobars',
+      '--disable-dev-shm-usage',
+      '--disable-background-networking',
+      '--disable-default-apps',
+      '--disable-extensions',
+      '--disable-sync',
+      '--disable-translate',
+      '--metrics-recording-only',
+      '--no-first-run',
+    ],
   });
 
   const context = await browser.newContext({
@@ -29,7 +43,54 @@ async function launchBrowser(headless = true) {
     locale: 'ja-JP',
   });
 
+  // ボット検出回避: navigator.webdriver 等を隠す
+  await context.addInitScript(() => {
+    // navigator.webdriver を undefined に
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+    // chrome オブジェクトを偽装
+    if (!window.chrome) {
+      window.chrome = { runtime: {}, loadTimes: () => ({}), csi: () => ({}) };
+    }
+
+    // permissions.query を偽装
+    const origQuery = navigator.permissions?.query?.bind(navigator.permissions);
+    if (origQuery) {
+      navigator.permissions.query = (params) =>
+        params.name === 'notifications'
+          ? Promise.resolve({ state: Notification.permission })
+          : origQuery(params);
+    }
+
+    // plugins を偽装（空だとヘッドレス検出される）
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5],
+    });
+
+    // languages を偽装
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['ja', 'en-US', 'en'],
+    });
+  });
+
   return { browser, context };
+}
+
+/**
+ * 人間らしいタイピング（ランダム遅延付き）
+ */
+async function humanType(page, selector, text) {
+  await page.click(selector);
+  await page.waitForTimeout(200 + Math.random() * 300);
+  // フィールドを選択してクリア
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Backspace');
+  await page.waitForTimeout(100);
+  // 1文字ずつタイプ（ランダム遅延）
+  for (const char of text) {
+    await page.keyboard.type(char, { delay: 30 + Math.random() * 80 });
+  }
+  await page.waitForTimeout(300 + Math.random() * 400);
 }
 
 /**
@@ -68,9 +129,20 @@ async function login(context) {
     // auth.user.ameba.jp/signin のフォームで認証
     logger.info(`認証ページ: ${page.url()}`);
     await page.waitForSelector('#accountId', { timeout: 15000 });
-    await page.fill('#accountId', config.ameblo.id);
-    await page.fill('#password', config.ameblo.password);
-    await page.waitForTimeout(1000);
+
+    // 人間らしいタイピングでフォーム入力（ボット検出回避）
+    logger.info('ID入力中...');
+    await humanType(page, '#accountId', config.ameblo.id);
+
+    logger.info('パスワード入力中...');
+    await humanType(page, '#password', config.ameblo.password);
+
+    // 入力確認ログ
+    const filledId = await page.$eval('#accountId', el => el.value).catch(() => '');
+    const filledPw = await page.$eval('#password', el => el.value).catch(() => '');
+    logger.info(`入力確認: ID=${filledId ? '入力済み' : '空'}, PW=${filledPw ? '入力済み' : '空'}`);
+
+    await page.waitForTimeout(1000 + Math.random() * 1000);
     await page.click('button[type="submit"]');
 
     // ログイン完了を待機
@@ -91,9 +163,14 @@ async function login(context) {
         logger.info('ログイン失敗時のスクリーンショットを保存しました: logs/login-failed.png');
       } catch { /* ignore */ }
 
-      // ページの内容をログに記録
+      // reCAPTCHA検出チェック
+      const hasRecaptcha = await page.locator('iframe[src*="recaptcha"]').isVisible().catch(() => false);
       const pageText = await page.textContent('body').catch(() => '');
       logger.error(`ログイン失敗ページの内容: ${pageText.slice(0, 500)}`);
+
+      if (hasRecaptcha || pageText.includes('ロボット') || pageText.includes('セキュリティチェック')) {
+        throw new Error(`reCAPTCHAが表示されました。VPSのIPがボット判定されている可能性があります。しばらく時間をおいて再試行してください。(URL: ${afterUrl})`);
+      }
 
       throw new Error(`ログインに失敗しました。ID/パスワードを確認してください。(URL: ${afterUrl})`);
     }
