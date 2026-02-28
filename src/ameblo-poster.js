@@ -101,7 +101,17 @@ async function login(context) {
     logger.info(`ログイン後URL: ${afterUrl}`);
 
     if (afterUrl.includes('signin') || afterUrl.includes('auth.user.ameba.jp/connect')) {
-      throw new Error('ログインに失敗しました。ID/パスワードを確認してください。');
+      // デバッグ用スクリーンショットを保存
+      try {
+        await page.screenshot({ path: resolve(config.paths.logs, 'login-failed.png'), fullPage: true });
+        logger.info('ログイン失敗時のスクリーンショットを保存しました: logs/login-failed.png');
+      } catch { /* ignore */ }
+
+      // ページの内容をログに記録
+      const pageText = await page.textContent('body').catch(() => '');
+      logger.error(`ログイン失敗ページの内容: ${pageText.slice(0, 500)}`);
+
+      throw new Error(`ログインに失敗しました。ID/パスワードを確認してください。(URL: ${afterUrl})`);
     }
 
     await saveSession(context);
