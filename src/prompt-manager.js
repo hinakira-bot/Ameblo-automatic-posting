@@ -13,6 +13,7 @@ const TEMPLATE_NAMES = [
   'article-body',
   'image-eyecatch',
   'image-diagram',
+  'image-diagram-howto',
 ];
 
 /**

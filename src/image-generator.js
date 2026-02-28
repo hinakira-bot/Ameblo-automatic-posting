@@ -11,6 +11,39 @@ const imageModel = genAI.getGenerativeModel({ model: config.gemini.imageModel })
 const REF_IMAGES_DIR = resolve(config.paths.data, 'reference-images');
 
 /**
+ * ハウツー系キーワードを判定するパターン
+ */
+const HOWTO_PATTERNS = [
+  /始め方/,
+  /やり方/,
+  /使い方/,
+  /方法/,
+  /手順/,
+  /設定方法/,
+  /導入方法/,
+  /インストール/,
+  /セットアップ/,
+  /登録方法/,
+  /作り方/,
+  /書き方/,
+  /出し方/,
+  /仕方/,
+  /how\s*to/i,
+  /tutorial/i,
+  /step.?by.?step/i,
+];
+
+/**
+ * キーワードがハウツー系かどうかを判定
+ * @param {string} keyword
+ * @returns {boolean}
+ */
+function isHowToKeyword(keyword) {
+  if (!keyword) return false;
+  return HOWTO_PATTERNS.some(pattern => pattern.test(keyword));
+}
+
+/**
  * 参照画像を読み込み（指定タイプのもの）
  * @param {'eyecatch' | 'diagram'} type
  * @returns {Array<{inlineData: {data: string, mimeType: string}}>}
@@ -126,10 +159,20 @@ export async function generateEyecatch(keyword, title, outputDir) {
 
 /**
  * h2見出し用の図解画像を生成
+ * @param {Array} outline - 見出し構成
+ * @param {string} outputDir - 出力先ディレクトリ
+ * @param {string} [keyword] - キーワード（ハウツー判定用）
  */
-export async function generateDiagrams(outline, outputDir) {
+export async function generateDiagrams(outline, outputDir, keyword) {
   mkdirSync(outputDir, { recursive: true });
-  const template = loadPrompt('image-diagram');
+
+  // ハウツー系キーワードならスクショ風テンプレートを使用
+  const isHowTo = isHowToKeyword(keyword);
+  const templateName = isHowTo ? 'image-diagram-howto' : 'image-diagram';
+  const template = loadPrompt(templateName);
+  if (isHowTo) {
+    logger.info(`ハウツー系キーワード検出: "${keyword}" → スクリーンショット風画像を使用`);
+  }
   const results = [];
 
   // 図解用の参照画像を読み込み（全図解で共通）
@@ -178,8 +221,8 @@ export async function generateAllImages(article) {
   // アイキャッチ生成
   const eyecatchPath = await generateEyecatch(article.keyword, article.title, outputDir);
 
-  // 図解生成
-  const diagrams = await generateDiagrams(article.outline, outputDir);
+  // 図解生成（キーワードを渡してハウツー判定）
+  const diagrams = await generateDiagrams(article.outline, outputDir, article.keyword);
 
   const successCount = diagrams.filter((d) => d.imagePath).length;
   logger.info(
