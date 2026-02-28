@@ -26,8 +26,60 @@ if (!global[globalKey]) {
 const state = global[globalKey];
 
 /**
+ * パスワード欄を見つけて入力（複数セレクター試行）
+ */
+async function fillPasswordField(page, password) {
+  // 複数のセレクターを試す
+  const selectors = [
+    '#password',
+    'input[type="password"]',
+    'input[name="password"]',
+    'input[placeholder*="パスワード"]',
+  ];
+
+  for (const sel of selectors) {
+    try {
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 2000 }).catch(() => false)) {
+        // fill() を使用（Reactフォームでより確実）
+        await el.fill('');
+        await page.waitForTimeout(200);
+        await el.fill(password);
+        await page.waitForTimeout(300);
+
+        // 入力確認
+        const value = await el.inputValue().catch(() => '');
+        if (value) {
+          logger.info(`パスワード入力成功 (セレクター: ${sel})`);
+          return true;
+        }
+      }
+    } catch {}
+  }
+
+  // フォールバック: keyboard.type で入力
+  try {
+    const pwField = page.locator('input[type="password"]').first();
+    await pwField.click();
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Control+a');
+    await page.keyboard.press('Backspace');
+    for (const char of password) {
+      await page.keyboard.type(char, { delay: 50 });
+    }
+    const value = await pwField.inputValue().catch(() => '');
+    if (value) {
+      logger.info('パスワード入力成功 (keyboard fallback)');
+      return true;
+    }
+  } catch {}
+
+  logger.warn('パスワード自動入力に失敗しました');
+  return false;
+}
+
+/**
  * 対話型セッションを開始
- * ブラウザ起動 → ログインページ → ID/PW自動入力 → スクリーンショット待機
  */
 export async function startInteractiveSession() {
   if (state.active) {
@@ -97,29 +149,26 @@ export async function startInteractiveSession() {
     if (config.ameblo.id && config.ameblo.password) {
       await state.page.waitForSelector('#accountId', { timeout: 10000 });
 
-      // ID入力
-      await state.page.click('#accountId');
-      await state.page.waitForTimeout(300);
-      await state.page.keyboard.press('Control+a');
-      await state.page.keyboard.press('Backspace');
-      for (const char of config.ameblo.id) {
-        await state.page.keyboard.type(char, { delay: 40 + Math.random() * 60 });
+      // ID入力（fill()使用）
+      try {
+        await state.page.locator('#accountId').fill(config.ameblo.id);
+        logger.info('ID入力成功');
+      } catch (err) {
+        logger.warn(`ID入力エラー: ${err.message}`);
       }
       await state.page.waitForTimeout(500);
 
-      // パスワード入力
-      await state.page.click('#password');
-      await state.page.waitForTimeout(300);
-      await state.page.keyboard.press('Control+a');
-      await state.page.keyboard.press('Backspace');
-      for (const char of config.ameblo.password) {
-        await state.page.keyboard.type(char, { delay: 40 + Math.random() * 60 });
-      }
+      // パスワード入力（複数セレクター試行）
+      const pwFilled = await fillPasswordField(state.page, config.ameblo.password);
       await state.page.waitForTimeout(500);
 
-      state.message = 'ID・パスワードを入力しました。reCAPTCHAが表示されている場合はチェックしてから「ログイン」ボタンをクリックしてください。';
+      if (pwFilled) {
+        state.message = 'ID・パスワードを入力済み。reCAPTCHAが表示されている場合はチェックしてから「ログイン」ボタンをクリックしてください。';
+      } else {
+        state.message = 'パスワードの自動入力に失敗しました。下の入力欄からパスワードを手動入力してください。';
+      }
     } else {
-      state.message = 'ID・パスワードを入力してからログインしてください。';
+      state.message = 'ID・パスワードが未設定です。設定ページで先に登録してください。';
     }
 
     state.status = 'ready';
@@ -157,6 +206,27 @@ export async function clickAt(x, y) {
   await state.page.waitForTimeout(2000);
 
   // ログイン成功チェック
+  await checkLoginSuccess();
+}
+
+/**
+ * キーボード入力を送信
+ */
+export async function typeText(text) {
+  if (!state.page) throw new Error('セッションが起動していません');
+  logger.info(`対話型セッション: テキスト入力 (${text.length}文字)`);
+  await state.page.keyboard.type(text, { delay: 50 });
+  await state.page.waitForTimeout(500);
+}
+
+/**
+ * 特殊キーを送信（Enter, Tab, Backspace等）
+ */
+export async function pressKey(key) {
+  if (!state.page) throw new Error('セッションが起動していません');
+  logger.info(`対話型セッション: キー (${key})`);
+  await state.page.keyboard.press(key);
+  await state.page.waitForTimeout(500);
   await checkLoginSuccess();
 }
 
@@ -217,7 +287,6 @@ export async function closeInteractiveSession() {
  * 現在の状態を取得
  */
 export function getSessionState() {
-  // セッションファイルの存在確認
   const hasSession = existsSync(resolve(SESSION_DIR, 'state.json'));
 
   return {

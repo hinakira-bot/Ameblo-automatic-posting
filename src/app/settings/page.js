@@ -45,6 +45,7 @@ export default function SettingsPage() {
   });
   const [screenshot, setScreenshot] = useState(null);
   const [sessionStarting, setSessionStarting] = useState(false);
+  const [typeInput, setTypeInput] = useState('');
   const imgRef = useRef(null);
   const pollingRef = useRef(null);
 
@@ -117,6 +118,50 @@ export default function SettingsPage() {
     } catch {}
     setSessionState({ active: false, status: 'idle', message: '', hasSession: sessionState.hasSession });
     setScreenshot(null);
+  };
+
+  const handleTypeSubmit = async (e) => {
+    e.preventDefault();
+    if (!typeInput || !sessionState.active) return;
+    try {
+      await fetch('/api/session/type', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: typeInput }),
+      });
+      setTypeInput('');
+      // 入力後にスクリーンショット更新
+      setTimeout(async () => {
+        try {
+          const res = await fetch('/api/session/screenshot');
+          const data = await res.json();
+          if (data.image) setScreenshot(data.image);
+        } catch {}
+      }, 500);
+    } catch {}
+  };
+
+  const handleKeyPress = async (key) => {
+    if (!sessionState.active) return;
+    try {
+      await fetch('/api/session/type', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+      setTimeout(async () => {
+        try {
+          const [ssRes, stRes] = await Promise.all([
+            fetch('/api/session/screenshot'),
+            fetch('/api/session'),
+          ]);
+          const ssData = await ssRes.json();
+          const stData = await stRes.json();
+          if (ssData.image) setScreenshot(ssData.image);
+          setSessionState(stData);
+        } catch {}
+      }, 500);
+    } catch {}
   };
 
   const handleScreenshotClick = useCallback(async (e) => {
@@ -356,6 +401,41 @@ export default function SettingsPage() {
                 </div>
               )}
 
+              {/* キーボード入力 */}
+              <div className="mb-3">
+                <p className="text-xs text-gray-500 mb-1">キーボード入力（パスワード欄をクリックしてから入力）</p>
+                <form onSubmit={handleTypeSubmit} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={typeInput}
+                    onChange={(e) => setTypeInput(e.target.value)}
+                    className="input-field flex-1"
+                    placeholder="テキストを入力して送信..."
+                    autoComplete="off"
+                  />
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    送信
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeyPress('Tab')}
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    Tab
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeyPress('Enter')}
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                  >
+                    Enter
+                  </button>
+                </form>
+              </div>
+
               {/* ローディング（スクリーンショット未取得時） */}
               {!screenshot && sessionState.status === 'starting' && (
                 <div className="border-2 border-gray-200 rounded-lg p-12 text-center text-gray-400 mb-3">
@@ -363,6 +443,13 @@ export default function SettingsPage() {
                   ブラウザを起動中...
                 </div>
               )}
+
+              {/* reCAPTCHA注意 */}
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-800 mb-3">
+                <strong>reCAPTCHAの画像認証が延々と続く場合:</strong> VPSのIPがGoogleにデータセンターIPと判定されています。
+                その場合は「セッションを閉じる」→ しばらく時間をおいてから再試行してください。
+                何度試しても解決しない場合は、時間帯を変えて試すと通ることがあります。
+              </div>
 
               <button
                 onClick={handleSessionClose}
