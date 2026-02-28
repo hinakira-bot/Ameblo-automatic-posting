@@ -51,10 +51,17 @@ export default function SettingsPage() {
   const imgRef = useRef(null);
   const pollingRef = useRef(null);
 
+  // 参照画像用
+  const [refImages, setRefImages] = useState([]);
+  const [refImageUploading, setRefImageUploading] = useState(false);
+  const [refImageMsg, setRefImageMsg] = useState('');
+  const refImageInputRef = useRef(null);
+
   useEffect(() => {
     fetchSettings();
     fetchCredentials();
     fetchSessionState();
+    fetchRefImages();
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
@@ -246,6 +253,62 @@ export default function SettingsPage() {
       setCredentials(data);
     } catch (err) {
       console.error('クレデンシャル取得エラー:', err);
+    }
+  };
+
+  const fetchRefImages = async () => {
+    try {
+      const res = await fetch('/api/reference-images');
+      const data = await res.json();
+      setRefImages(data.images || []);
+    } catch (err) {
+      console.error('参照画像取得エラー:', err);
+    }
+  };
+
+  const handleRefImageUpload = async (e, imageType) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRefImageUploading(true);
+    setRefImageMsg('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', imageType);
+
+      const res = await fetch('/api/reference-images', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setRefImageMsg(data.message);
+        fetchRefImages();
+        setTimeout(() => setRefImageMsg(''), 3000);
+      } else {
+        setRefImageMsg(data.error || 'アップロード失敗');
+      }
+    } catch (err) {
+      setRefImageMsg('エラー: ' + err.message);
+    } finally {
+      setRefImageUploading(false);
+      if (refImageInputRef.current) refImageInputRef.current.value = '';
+    }
+  };
+
+  const handleRefImageDelete = async (filename) => {
+    try {
+      const res = await fetch('/api/reference-images', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        fetchRefImages();
+      }
+    } catch (err) {
+      console.error('参照画像削除エラー:', err);
     }
   };
 
@@ -694,6 +757,92 @@ export default function SettingsPage() {
               ))}
             </select>
           </Field>
+
+          {/* 参照画像アップロード */}
+          <div className="border-t border-gray-200 pt-4 mt-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">参照画像（スタイル参考）</h3>
+            <p className="text-xs text-gray-600 mb-3">
+              アイキャッチや図解のスタイル参考として画像をアップロードできます。
+              アップロードした画像の雰囲気・色使い・テイストを参考にAIが画像を生成します。
+            </p>
+
+            {refImageMsg && (
+              <div className={`rounded-lg px-4 py-2 text-sm mb-3 ${refImageMsg.includes('エラー') ? 'bg-red-50 text-red-800' : 'bg-green-50 text-green-800'}`}>
+                {refImageMsg}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              {/* アイキャッチ参照 */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs font-medium text-gray-700 mb-2">アイキャッチ用参照</p>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={(e) => handleRefImageUpload(e, 'eyecatch')}
+                  disabled={refImageUploading}
+                  className="text-xs w-full"
+                />
+                {/* アイキャッチ参照画像一覧 */}
+                {refImages.filter(img => img.type === 'eyecatch').map((img) => (
+                  <div key={img.filename} className="mt-2 flex items-center gap-2">
+                    <img
+                      src={`data:${img.mimeType};base64,${img.base64}`}
+                      alt={img.filename}
+                      className="w-16 h-10 object-cover rounded border"
+                    />
+                    <span className="text-xs text-gray-500 flex-1 truncate">{img.filename}</span>
+                    <button
+                      onClick={() => handleRefImageDelete(img.filename)}
+                      className="text-red-500 hover:text-red-700 text-xs cursor-pointer"
+                    >
+                      削除
+                    </button>
+                  </div>
+                ))}
+                {refImages.filter(img => img.type === 'eyecatch').length === 0 && (
+                  <p className="text-xs text-gray-400 mt-2">未設定（デフォルトスタイルで生成）</p>
+                )}
+              </div>
+
+              {/* 図解参照 */}
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-xs font-medium text-gray-700 mb-2">図解用参照</p>
+                <input
+                  ref={refImageInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={(e) => handleRefImageUpload(e, 'diagram')}
+                  disabled={refImageUploading}
+                  className="text-xs w-full"
+                />
+                {/* 図解参照画像一覧 */}
+                {refImages.filter(img => img.type === 'diagram').map((img) => (
+                  <div key={img.filename} className="mt-2 flex items-center gap-2">
+                    <img
+                      src={`data:${img.mimeType};base64,${img.base64}`}
+                      alt={img.filename}
+                      className="w-16 h-10 object-cover rounded border"
+                    />
+                    <span className="text-xs text-gray-500 flex-1 truncate">{img.filename}</span>
+                    <button
+                      onClick={() => handleRefImageDelete(img.filename)}
+                      className="text-red-500 hover:text-red-700 text-xs cursor-pointer"
+                    >
+                      削除
+                    </button>
+                  </div>
+                ))}
+                {refImages.filter(img => img.type === 'diagram').length === 0 && (
+                  <p className="text-xs text-gray-400 mt-2">未設定（デフォルトスタイルで生成）</p>
+                )}
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              ※ 各タイプ最大3枚まで。PNG/JPG/WEBP/GIF対応（5MB以下）
+            </p>
+          </div>
         </Section>
 
         {/* その他 */}

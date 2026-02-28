@@ -1,5 +1,5 @@
 import { getNextKeyword, getKeywordById, markAsPosted, markAsFailed } from './keyword-manager.js';
-import { analyzeCompetitors } from './competitor-analyzer.js';
+import { analyzeCompetitors, searchLatestNews } from './competitor-analyzer.js';
 import { generateArticle } from './content-generator.js';
 import { generateAllImages } from './image-generator.js';
 import { postToAmeblo } from './ameblo-poster.js';
@@ -100,12 +100,24 @@ export async function runPipeline(options = {}) {
       };
     }
 
-    // === STEP 2: 記事生成（description + knowledge を渡す） ===
+    // === STEP 1.5: 最新情報検索 ===
+    let latestNews = null;
+    if (keyword) {
+      onProgress?.({ step: 'analysis', message: '最新情報を検索中...', progress: 28 });
+      logger.info('--- STEP 1.5: 最新情報検索 ---');
+      latestNews = await searchLatestNews(keyword);
+      const newsCount = latestNews?.latestNews?.length || 0;
+      logger.info(`最新情報: ${newsCount}件取得`);
+      onProgress?.({ message: `最新情報: ${newsCount}件取得`, progress: 32 });
+    }
+
+    // === STEP 2: 記事生成（description + knowledge + latestNews を渡す） ===
     onProgress?.({ step: 'content', message: '記事生成中...', progress: 35 });
     logger.info('--- STEP 2: 記事生成 ---');
     const article = await generateArticle(keyword, analysisData, {
       description,
       knowledge,
+      latestNews,
       mode,
     });
     onProgress?.({ message: `記事生成完了: ${article.title}`, progress: 60, title: article.title });

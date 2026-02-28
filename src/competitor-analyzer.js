@@ -177,6 +177,90 @@ export function formatAnalysisForPrompt(analysis) {
   return text;
 }
 
+/**
+ * Gemini + Google Search Grounding で最新情報を取得
+ */
+export async function searchLatestNews(keyword) {
+  logger.info(`最新情報を検索中: "${keyword}"`);
+
+  const model = genAI.getGenerativeModel({
+    model: config.gemini.textModel,
+    tools: [{ googleSearch: {} }],
+  });
+
+  const currentYear = new Date().getFullYear();
+  const prompt = `以下のキーワードに関する最新情報・最新ニュースを調査してください。
+
+キーワード: "${keyword}"
+
+特に以下の観点で調査してください：
+- ${currentYear}年の最新ニュース・トレンド・アップデート
+- 最近発表されたデータ・統計・調査結果
+- 業界の最新動向・変化・新サービス
+- 法改正・制度変更など最新の公式情報
+- 検索上位の既存記事にはまだ含まれていない可能性のある新しい情報
+
+以下のJSON形式で出力してください。JSON以外のテキストは不要です。
+{
+  "latestNews": [
+    {
+      "title": "ニュースのタイトルや要約",
+      "detail": "具体的な内容（数値・日付含む）",
+      "source": "情報源（サイト名やURL）",
+      "date": "発表日・掲載日（わかる範囲）"
+    }
+  ],
+  "trends": ["最新トレンド1", "最新トレンド2"],
+  "keyInsights": "記事に反映すべき重要な最新ポイントの要約（200字以内）"
+}
+
+最新で信頼性の高い情報を5〜10件程度取得してください。`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
+    const parsed = parseJSON(text);
+    logger.info(`最新情報: ${parsed.latestNews?.length || 0}件取得`);
+    return parsed;
+  } catch (err) {
+    logger.warn(`最新情報検索エラー: ${err.message}`);
+    return { latestNews: [], trends: [], keyInsights: '' };
+  }
+}
+
+/**
+ * 最新情報をプロンプト用テキストに変換
+ */
+export function formatLatestNewsForPrompt(latestNews) {
+  if (!latestNews || (!latestNews.latestNews?.length && !latestNews.keyInsights)) {
+    return '';
+  }
+
+  let text = `## 最新情報（${new Date().getFullYear()}年）\n`;
+
+  if (latestNews.keyInsights) {
+    text += `\n### 重要ポイント\n${latestNews.keyInsights}\n`;
+  }
+
+  if (latestNews.trends?.length > 0) {
+    text += `\n### 最新トレンド\n`;
+    for (const trend of latestNews.trends) {
+      text += `- ${trend}\n`;
+    }
+  }
+
+  if (latestNews.latestNews?.length > 0) {
+    text += `\n### 最新ニュース\n`;
+    for (const news of latestNews.latestNews) {
+      text += `- **${news.title}**: ${news.detail}`;
+      if (news.date) text += ` (${news.date})`;
+      text += `\n`;
+    }
+  }
+
+  return text;
+}
+
 /** JSONパーサー */
 function parseJSON(text) {
   const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();

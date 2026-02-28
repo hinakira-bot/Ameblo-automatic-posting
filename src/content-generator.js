@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import config from './config.js';
 import logger from './logger.js';
 import { loadPrompt, renderPrompt } from './prompt-manager.js';
-import { formatAnalysisForPrompt } from './competitor-analyzer.js';
+import { formatAnalysisForPrompt, formatLatestNewsForPrompt } from './competitor-analyzer.js';
 
 const genAI = new GoogleGenerativeAI(config.gemini.apiKey);
 const textModel = genAI.getGenerativeModel({ model: config.gemini.textModel });
@@ -92,17 +92,24 @@ async function generateBody(keyword, title, outline, searchIntent, baseVars) {
  * 記事全体を生成するメインフロー
  * @param {string} keyword - キーワード（空の場合あり）
  * @param {object} analysisData - 競合分析データ
- * @param {object} context - {description, knowledge, mode}
+ * @param {object} context - {description, knowledge, latestNews, mode}
  */
 export async function generateArticle(keyword, analysisData, context = {}) {
-  const { description = '', knowledge = '', mode = 'keyword-only' } = context;
+  const { description = '', knowledge = '', latestNews = null, mode = 'keyword-only' } = context;
   logger.info(`=== 記事生成開始: "${keyword || description.slice(0, 30)}" (${mode}) ===`);
+
+  // 最新情報をテキスト化
+  const latestNewsText = latestNews ? formatLatestNewsForPrompt(latestNews) : '';
+  if (latestNewsText) {
+    logger.info(`最新情報をプロンプトに反映: ${latestNewsText.length}文字`);
+  }
 
   // 全ステップ共通の変数
   const baseVars = {
     keyword: keyword || '(キーワード未指定)',
     description,
     knowledge,
+    latestNews: latestNewsText,
     minLength: String(config.posting.minLength),
     maxLength: String(config.posting.maxLength),
   };
