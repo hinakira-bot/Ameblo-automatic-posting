@@ -8,7 +8,13 @@ const FREQUENCY_OPTIONS = [
   { value: 'weekday', label: '平日のみ' },
 ];
 
-const HOURS = Array.from({ length: 24 }, (_, i) => i);
+// 10分刻みの時刻リスト（"0:00", "0:10", ..., "23:50"）
+const TIME_OPTIONS = [];
+for (let h = 0; h < 24; h++) {
+  for (let m = 0; m < 60; m += 10) {
+    TIME_OPTIONS.push({ value: `${h}:${String(m).padStart(2, '0')}`, label: `${h}:${String(m).padStart(2, '0')}` });
+  }
+}
 
 const TEXT_MODELS = [
   { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (最新・推奨)' },
@@ -45,8 +51,8 @@ export default function SettingsPage() {
 
   // スケジュールUI用
   const [frequency, setFrequency] = useState('daily1');
-  const [hour1, setHour1] = useState(9);
-  const [hour2, setHour2] = useState(15);
+  const [time1, setTime1] = useState('9:00');
+  const [time2, setTime2] = useState('15:00');
 
   // 対話型セッション用
   const [sessionState, setSessionState] = useState({
@@ -249,8 +255,8 @@ export default function SettingsPage() {
       const cron = data.settings?.posting?.cronSchedule || '0 9 * * *';
       const parsed = parseCronSimple(cron);
       setFrequency(parsed.frequency);
-      setHour1(parsed.hour1);
-      setHour2(parsed.hour2);
+      setTime1(parsed.time1);
+      setTime2(parsed.time2);
     } catch (err) {
       console.error('設定取得エラー:', err);
     } finally {
@@ -395,7 +401,7 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage('');
 
-    const cron = buildCronSimple({ frequency, hour1, hour2 });
+    const cron = buildCronSimple({ frequency, time1, time2 });
     const updates = {
       'article.minLength': settings.article.minLength,
       'article.maxLength': settings.article.maxLength,
@@ -449,7 +455,7 @@ export default function SettingsPage() {
     return <div className="text-center text-gray-500 py-12">読み込み中...</div>;
   }
 
-  const cronDescription = describeCronSimple({ frequency, hour1, hour2 });
+  const cronDescription = describeCronSimple({ frequency, time1, time2 });
 
   return (
     <div className="max-w-2xl">
@@ -790,12 +796,12 @@ export default function SettingsPage() {
 
           <Field label="1回目の時刻">
             <select
-              value={hour1}
-              onChange={(e) => setHour1(parseInt(e.target.value))}
+              value={time1}
+              onChange={(e) => setTime1(e.target.value)}
               className="input-field"
             >
-              {HOURS.map((h) => (
-                <option key={h} value={h}>{h}:00</option>
+              {TIME_OPTIONS.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
           </Field>
@@ -803,12 +809,12 @@ export default function SettingsPage() {
           {frequency === 'daily2' && (
             <Field label="2回目の時刻">
               <select
-                value={hour2}
-                onChange={(e) => setHour2(parseInt(e.target.value))}
+                value={time2}
+                onChange={(e) => setTime2(e.target.value)}
                 className="input-field"
               >
-                {HOURS.map((h) => (
-                  <option key={h} value={h}>{h}:00</option>
+                {TIME_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>
             </Field>
@@ -987,43 +993,108 @@ function Field({ label, children }) {
 
 // --- ヘルパー関数（クライアントサイド） ---
 
-function buildCronSimple({ frequency, hour1, hour2 }) {
-  const h1 = Math.min(23, Math.max(0, parseInt(hour1) || 0));
+/** "H:MM" → { hour, minute } */
+function parseTime(timeStr) {
+  const [h, m] = (timeStr || '0:00').split(':').map(Number);
+  return {
+    hour: Math.min(23, Math.max(0, h || 0)),
+    minute: Math.min(50, Math.max(0, Math.round((m || 0) / 10) * 10)),
+  };
+}
+
+/** { hour, minute } → "H:MM" */
+function formatTime(hour, minute) {
+  return `${hour}:${String(minute).padStart(2, '0')}`;
+}
+
+function buildCronSimple({ frequency, time1, time2 }) {
+  const t1 = parseTime(time1);
   switch (frequency) {
     case 'daily2': {
-      const h2 = Math.min(23, Math.max(0, parseInt(hour2) || 15));
-      const hours = [h1, h2].sort((a, b) => a - b).join(',');
-      return `0 ${hours} * * *`;
+      const t2 = parseTime(time2);
+      // 2つの時刻が同じ時間帯の場合は分をカンマ区切り、違う場合は別々のcron
+      if (t1.hour === t2.hour) {
+        const mins = [t1.minute, t2.minute].sort((a, b) => a - b).join(',');
+        return `${mins} ${t1.hour} * * *`;
+      }
+      // 時間が異なる場合: 分が同じならシンプルに、違うなら2つのエントリ
+      if (t1.minute === t2.minute) {
+        const hours = [t1.hour, t2.hour].sort((a, b) => a - b).join(',');
+        return `${t1.minute} ${hours} * * *`;
+      }
+      // 分も時間も異なる場合: 2つのcronをセミコロンで区切って保存はできないので
+      // node-cron対応の形式で保存
+      const sorted = [t1, t2].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+      return `${sorted[0].minute} ${sorted[0].hour},${sorted[1].minute} ${sorted[1].hour} * * *`
+        // ↑ これは無効なcron。代わりに2エントリ方式にする
+        .replace(/.*/, () => {
+          // 2つの独立したcronエントリを ; で区切る（scheduler.js で対応）
+          return `${sorted[0].minute} ${sorted[0].hour} * * *;${sorted[1].minute} ${sorted[1].hour} * * *`;
+        });
     }
     case 'weekday':
-      return `0 ${h1} * * 1-5`;
+      return `${t1.minute} ${t1.hour} * * 1-5`;
     default:
-      return `0 ${h1} * * *`;
+      return `${t1.minute} ${t1.hour} * * *`;
   }
 }
 
 function parseCronSimple(cron) {
-  if (!cron) return { frequency: 'daily1', hour1: 9, hour2: 15 };
+  const defaultResult = { frequency: 'daily1', time1: '9:00', time2: '15:00' };
+  if (!cron) return defaultResult;
+
+  // セミコロン区切り（daily2で分が異なる場合）
+  if (cron.includes(';')) {
+    const [c1, c2] = cron.split(';').map(s => s.trim());
+    const p1 = c1.split(' ');
+    const p2 = c2.split(' ');
+    if (p1.length === 5 && p2.length === 5) {
+      const t1 = formatTime(Number(p1[1]), Number(p1[0]));
+      const t2 = formatTime(Number(p2[1]), Number(p2[0]));
+      return { frequency: 'daily2', time1: t1, time2: t2 };
+    }
+    return defaultResult;
+  }
+
   const parts = cron.split(' ');
-  if (parts.length !== 5) return { frequency: 'daily1', hour1: 9, hour2: 15 };
-  const [, hourStr, , , dow] = parts;
+  if (parts.length !== 5) return defaultResult;
+
+  const [minStr, hourStr, , , dow] = parts;
   const hours = hourStr.split(',').map(Number);
-  return {
-    frequency: dow === '1-5' ? 'weekday' : hours.length > 1 ? 'daily2' : 'daily1',
-    hour1: hours[0] || 9,
-    hour2: hours[1] || 15,
-  };
+  const mins = minStr.split(',').map(Number);
+
+  if (dow === '1-5') {
+    return { frequency: 'weekday', time1: formatTime(hours[0] || 9, mins[0] || 0), time2: '15:00' };
+  }
+
+  if (hours.length > 1) {
+    // daily2: 同じ分で複数時間
+    return {
+      frequency: 'daily2',
+      time1: formatTime(hours[0], mins[0] || 0),
+      time2: formatTime(hours[1], mins[mins.length > 1 ? 1 : 0] || 0),
+    };
+  }
+
+  if (mins.length > 1) {
+    // daily2: 同じ時間で複数分
+    return {
+      frequency: 'daily2',
+      time1: formatTime(hours[0], mins[0]),
+      time2: formatTime(hours[0], mins[1]),
+    };
+  }
+
+  return { frequency: 'daily1', time1: formatTime(hours[0] || 9, mins[0] || 0), time2: '15:00' };
 }
 
-function describeCronSimple({ frequency, hour1, hour2 }) {
-  const h1 = parseInt(hour1) || 0;
-  const h2 = parseInt(hour2) || 15;
+function describeCronSimple({ frequency, time1, time2 }) {
   switch (frequency) {
     case 'daily2':
-      return `毎日 ${h1}:00 と ${h2}:00 に自動投稿`;
+      return `毎日 ${time1} と ${time2} に自動投稿`;
     case 'weekday':
-      return `平日 ${h1}:00 に自動投稿`;
+      return `平日 ${time1} に自動投稿`;
     default:
-      return `毎日 ${h1}:00 に自動投稿`;
+      return `毎日 ${time1} に自動投稿`;
   }
 }

@@ -9,13 +9,40 @@ import cron from 'node-cron';
 const globalKey = Symbol.for('cron-scheduler');
 if (!global[globalKey]) {
   global[globalKey] = {
-    task: null,
+    tasks: [],       // 複数cronジョブに対応
     currentSchedule: null,
     initialized: false,
   };
 }
 
 const schedulerState = global[globalKey];
+
+/** パイプライン実行のコールバック */
+async function executeScheduledPost() {
+  let logger;
+  try {
+    logger = (await import('../logger.js')).default;
+  } catch {
+    logger = console;
+  }
+
+  logger.info('[Scheduler] --- スケジュール自動投稿 実行開始 ---');
+
+  // パイプラインが既に実行中かチェック
+  const { getStatus, startPipeline } = await import('./pipeline-runner.js');
+  const status = getStatus();
+  if (status.running) {
+    logger.warn('[Scheduler] パイプラインが既に実行中のためスキップ');
+    return;
+  }
+
+  try {
+    await startPipeline({ dryRun: false });
+    logger.info('[Scheduler] スケジュール実行を開始しました');
+  } catch (err) {
+    logger.error(`[Scheduler] スケジュール実行エラー: ${err.message}`);
+  }
+}
 
 /**
  * スケジューラーを初期化（サーバー起動時に1回だけ呼ばれる）
@@ -39,55 +66,43 @@ export async function initScheduler() {
 }
 
 /**
+ * 全てのcronジョブを停止
+ */
+function stopAllTasks() {
+  for (const task of schedulerState.tasks) {
+    try {
+      task.stop();
+    } catch { /* ignore */ }
+  }
+  schedulerState.tasks = [];
+}
+
+/**
  * cronジョブを開始（既存のジョブがあれば停止してから）
- * @param {string} schedule - cron式
+ * セミコロン区切りで複数のcron式に対応
+ * @param {string} schedule - cron式（セミコロン区切りで複数可）
  */
 export function startCron(schedule) {
-  // 既存のジョブを停止
-  if (schedulerState.task) {
-    schedulerState.task.stop();
-    schedulerState.task = null;
-  }
+  // 既存のジョブを全て停止
+  stopAllTasks();
 
-  if (!cron.validate(schedule)) {
-    console.error(`[Scheduler] 無効なcronスケジュール: ${schedule}`);
-    return false;
+  // セミコロン区切りで分割（daily2で分が異なる場合）
+  const schedules = schedule.split(';').map(s => s.trim()).filter(Boolean);
+
+  for (const sched of schedules) {
+    if (!cron.validate(sched)) {
+      console.error(`[Scheduler] 無効なcronスケジュール: ${sched}`);
+      continue;
+    }
+
+    const task = cron.schedule(sched, executeScheduledPost, {
+      timezone: 'Asia/Tokyo',
+    });
+    schedulerState.tasks.push(task);
   }
 
   schedulerState.currentSchedule = schedule;
-  schedulerState.task = cron.schedule(
-    schedule,
-    async () => {
-      let logger;
-      try {
-        logger = (await import('../logger.js')).default;
-      } catch {
-        logger = console;
-      }
-
-      logger.info('[Scheduler] --- スケジュール自動投稿 実行開始 ---');
-
-      // パイプラインが既に実行中かチェック
-      const { getStatus, startPipeline } = await import('./pipeline-runner.js');
-      const status = getStatus();
-      if (status.running) {
-        logger.warn('[Scheduler] パイプラインが既に実行中のためスキップ');
-        return;
-      }
-
-      try {
-        await startPipeline({ dryRun: false });
-        logger.info('[Scheduler] スケジュール実行を開始しました');
-      } catch (err) {
-        logger.error(`[Scheduler] スケジュール実行エラー: ${err.message}`);
-      }
-    },
-    {
-      timezone: 'Asia/Tokyo',
-    }
-  );
-
-  return true;
+  return schedulerState.tasks.length > 0;
 }
 
 /**
@@ -97,7 +112,7 @@ export function getSchedulerStatus() {
   return {
     initialized: schedulerState.initialized,
     schedule: schedulerState.currentSchedule,
-    running: schedulerState.task !== null,
+    running: schedulerState.tasks.length > 0,
   };
 }
 
