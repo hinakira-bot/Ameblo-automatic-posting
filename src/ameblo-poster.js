@@ -5,7 +5,7 @@ import config from './config.js';
 import logger from './logger.js';
 
 const SESSION_DIR = config.paths.session;
-const LOGIN_URL = 'https://www.ameba.jp/login';
+const LOGIN_URL = 'https://auth.user.ameba.jp/signin';
 const EDITOR_URL = 'https://blog.ameba.jp/ucs/entry/srventryinsertinput.do';
 
 /**
@@ -51,30 +51,14 @@ async function login(context) {
       return true;
     }
 
-    // ログインが必要 → ログインページへ
+    // ログインが必要 → 認証ページへ直接アクセス
     logger.info('アメブロにログイン中...');
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle', timeout: 60000 });
     await page.waitForTimeout(2000);
 
-    // ameba.jp/login から「ログイン」リンクをクリック
-    const currentUrl = page.url();
-    if (currentUrl.includes('www.ameba.jp')) {
-      const loginLink = page.locator('a:has-text("ログイン")').first();
-      if (await loginLink.isVisible()) {
-        logger.info('認証ページへ遷移中...');
-        await loginLink.click();
-        await page.waitForURL((url) => {
-          const href = url.href;
-          return href.includes('auth.user.ameba.jp') || href.includes('/home');
-        }, { timeout: 15000 });
-        await page.waitForLoadState('networkidle');
-        await page.waitForTimeout(3000);
-      }
-    }
-
-    // ログイン済みの場合（/homeにリダイレクトされた）
-    const afterClickUrl = page.url();
-    if (afterClickUrl.includes('/home') || afterClickUrl.includes('blog.ameba.jp')) {
+    // ログイン済みの場合（/homeやブログページにリダイレクトされた）
+    const afterNavUrl = page.url();
+    if (afterNavUrl.includes('/home') || afterNavUrl.includes('blog.ameba.jp')) {
       logger.info('既にログイン済みです（セッション有効）');
       await saveSession(context);
       await page.close();
