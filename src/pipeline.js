@@ -1,4 +1,4 @@
-import { getNextKeyword, markAsPosted, markAsFailed } from './keyword-manager.js';
+import { getNextKeyword, getKeywordById, markAsPosted, markAsFailed } from './keyword-manager.js';
 import { analyzeCompetitors } from './competitor-analyzer.js';
 import { generateArticle } from './content-generator.js';
 import { generateAllImages } from './image-generator.js';
@@ -15,7 +15,8 @@ import logger from './logger.js';
  *
  * @param {Object} options
  * @param {boolean} [options.dryRun] - ドライランモード
- * @param {string} [options.keyword] - 特定キーワードを指定
+ * @param {string} [options.keyword] - 特定キーワードを指定（キーワード文字列）
+ * @param {string} [options.keywordId] - 特定キーワードをIDで指定
  * @param {Function} [options.onProgress] - 進捗コールバック ({step, message, progress, keyword, title})
  */
 export async function runPipeline(options = {}) {
@@ -30,7 +31,18 @@ export async function runPipeline(options = {}) {
     logger.info('  アメブロ自動投稿パイプライン開始');
     logger.info('========================================');
 
-    const keywordData = getNextKeyword();
+    let keywordData;
+    if (options.keywordId) {
+      // IDで特定のキーワードを指定
+      keywordData = getKeywordById(options.keywordId);
+      if (!keywordData) {
+        logger.warn(`指定されたキーワードが見つかりません: ${options.keywordId}`);
+        return { success: false, reason: 'keyword_not_found' };
+      }
+      logger.info(`指定キーワードで実行: "${keywordData.keyword || keywordData.description?.slice(0, 30)}"`);
+    } else {
+      keywordData = getNextKeyword();
+    }
     if (!keywordData) {
       logger.warn('未投稿キーワードがありません。終了します。');
       return { success: false, reason: 'no_keywords' };

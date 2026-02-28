@@ -79,7 +79,9 @@ export async function startPipeline(options = {}) {
   state.logs = [];
   state.result = null;
 
-  addLog('info', `パイプライン開始 (${options.dryRun ? 'ドライラン' : '本番'})`);
+  const modeLabel = options.dryRun ? 'ドライラン' : '本番';
+  const kwLabel = options.keywordId ? ' / キーワード指定' : '';
+  addLog('info', `パイプライン開始 (${modeLabel}${kwLabel})`);
   broadcast({ type: 'started' });
 
   // 非同期で実行（呼び出し元はawaitしない）
