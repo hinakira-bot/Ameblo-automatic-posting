@@ -7,6 +7,7 @@ import PipelineProgress from '@/components/PipelineProgress';
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [recentPosts, setRecentPosts] = useState([]);
+  const [scheduler, setScheduler] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // パイプライン実行
@@ -29,6 +30,7 @@ export default function Dashboard() {
       const data = await res.json();
       setStats(data.stats);
       setRecentPosts(data.recentPosts || []);
+      setScheduler(data.scheduler || null);
     } catch (err) {
       console.error('データ取得エラー:', err);
     } finally {
@@ -111,6 +113,23 @@ export default function Dashboard() {
         <StatCard label="投稿済" value={stats?.posted || 0} color="green" />
         <StatCard label="失敗" value={stats?.failed || 0} color="red" />
       </div>
+
+      {/* スケジューラー状態 */}
+      {scheduler && (
+        <div className={`rounded-xl border px-5 py-3 mb-8 flex items-center gap-3 ${scheduler.running ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+          <span className={`w-2.5 h-2.5 rounded-full ${scheduler.running ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+          <span className="text-sm font-medium text-gray-700">
+            自動投稿スケジューラー:
+          </span>
+          {scheduler.running ? (
+            <span className="text-sm text-green-700">
+              稼働中 — <span className="font-mono">{scheduler.schedule}</span>
+            </span>
+          ) : (
+            <span className="text-sm text-gray-500">停止中</span>
+          )}
+        </div>
+      )}
 
       {/* パイプライン実行パネル */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-8">

@@ -13,7 +13,15 @@ export async function GET() {
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .slice(0, 5);
 
-    return NextResponse.json({ stats, recentPosts });
+    // スケジューラー状態
+    let scheduler = { initialized: false, schedule: null, running: false };
+    try {
+      const { getSchedulerStatus, ensureInitialized } = await import('@/lib/scheduler.js');
+      ensureInitialized();
+      scheduler = getSchedulerStatus();
+    } catch { /* ignore */ }
+
+    return NextResponse.json({ stats, recentPosts, scheduler });
   } catch (err) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

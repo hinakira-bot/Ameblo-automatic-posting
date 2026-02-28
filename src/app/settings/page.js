@@ -10,6 +10,13 @@ const FREQUENCY_OPTIONS = [
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
+const TEXT_MODELS = [
+  { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (最新・推奨)' },
+  { value: 'gemini-2.5-flash-preview-05-20', label: 'Gemini 2.5 Flash Preview' },
+  { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (安定)' },
+  { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite (軽量)' },
+];
+
 const IMAGE_MODELS = [
   { value: 'gemini-3.1-flash-image-preview', label: 'Gemini 3.1 Flash Image (推奨・高速)' },
   { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro Image (高品質)' },
@@ -30,6 +37,11 @@ export default function SettingsPage() {
   });
   const [credSaving, setCredSaving] = useState(false);
   const [credMessage, setCredMessage] = useState('');
+
+  // テキストモデル選択用
+  const [textModel, setTextModel] = useState('gemini-2.0-flash');
+  const [textModelSaving, setTextModelSaving] = useState(false);
+  const [textModelMsg, setTextModelMsg] = useState('');
 
   // スケジュールUI用
   const [frequency, setFrequency] = useState('daily1');
@@ -251,6 +263,10 @@ export default function SettingsPage() {
       const res = await fetch('/api/credentials');
       const data = await res.json();
       setCredentials(data);
+      // テキストモデルも反映
+      if (data.geminiTextModel) {
+        setTextModel(data.geminiTextModel);
+      }
     } catch (err) {
       console.error('クレデンシャル取得エラー:', err);
     }
@@ -309,6 +325,31 @@ export default function SettingsPage() {
       }
     } catch (err) {
       console.error('参照画像削除エラー:', err);
+    }
+  };
+
+  const handleTextModelSave = async (newModel) => {
+    setTextModelSaving(true);
+    setTextModelMsg('');
+    setTextModel(newModel);
+    try {
+      const res = await fetch('/api/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ geminiTextModel: newModel }),
+      });
+      if (res.ok) {
+        setTextModelMsg('テキストモデルを更新しました');
+        fetchCredentials();
+        setTimeout(() => setTextModelMsg(''), 3000);
+      } else {
+        const data = await res.json();
+        setTextModelMsg(data.error || '保存に失敗しました');
+      }
+    } catch (err) {
+      setTextModelMsg('エラー: ' + err.message);
+    } finally {
+      setTextModelSaving(false);
     }
   };
 
@@ -648,6 +689,40 @@ export default function SettingsPage() {
               <span className="text-sm text-amber-700">{credMessage}</span>
             )}
           </div>
+        </Section>
+
+        {/* AIモデル設定 */}
+        <Section title="AIモデル設定">
+          <Field label="テキスト生成モデル">
+            <div className="flex items-center gap-3">
+              <select
+                value={textModel}
+                onChange={(e) => handleTextModelSave(e.target.value)}
+                disabled={textModelSaving}
+                className="input-field flex-1"
+              >
+                {TEXT_MODELS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+              {textModelSaving && (
+                <span className="text-xs text-gray-500">保存中...</span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              記事生成・競合分析・最新情報検索に使用するモデル
+            </p>
+            {textModelMsg && (
+              <p className={`text-xs mt-1 ${textModelMsg.includes('エラー') ? 'text-red-600' : 'text-green-600'}`}>
+                {textModelMsg}
+              </p>
+            )}
+          </Field>
+          {credentials && (
+            <div className="bg-gray-50 rounded-lg px-4 py-2 text-xs text-gray-600">
+              現在のモデル: <span className="font-mono font-medium text-gray-800">{credentials.geminiTextModel || 'gemini-2.0-flash'}</span>
+            </div>
+          )}
         </Section>
 
         {/* 記事設定 */}
