@@ -62,6 +62,9 @@ export default function RootLayout({ children }) {
   if (pathname?.startsWith('/setup')) {
     return (
       <html lang="ja">
+        <head>
+          <title>セットアップ - アメブロ自動投稿ツール</title>
+        </head>
         <body className="bg-gray-100">
           {children}
         </body>
@@ -73,6 +76,9 @@ export default function RootLayout({ children }) {
   if (!configChecked) {
     return (
       <html lang="ja">
+        <head>
+          <title>アメブロ自動投稿ツール</title>
+        </head>
         <body className="bg-gray-100">
           <div className="flex items-center justify-center min-h-screen">
             <div className="text-gray-500">読み込み中...</div>
@@ -84,6 +90,9 @@ export default function RootLayout({ children }) {
 
   return (
     <html lang="ja">
+      <head>
+        <title>アメブロ自動投稿ツール</title>
+      </head>
       <body className="bg-gray-100">
         <div className="flex min-h-screen">
           <Sidebar onRunPipeline={handleRunPipeline} />
