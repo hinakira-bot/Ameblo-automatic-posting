@@ -329,20 +329,42 @@ async function setCoverImage(page) {
 /**
  * <p>タグ内の複数文を1文ずつ別の<p>タグに分割する
  * AIが1つの<p>に複数文を入れてしまった場合の保険処理
+ * <strong>等のインラインHTMLタグを含む段落にも対応
  */
 function splitSentencesIntoParagraphs(html) {
-  return html.replace(/<p>((?:(?!<img|<ul|<ol|<table)[^<])+)<\/p>/g, (match, content) => {
-    // 画像やリストを含むpタグはそのまま
+  return html.replace(/<p>([\s\S]*?)<\/p>/g, (match, content) => {
     const trimmed = content.trim();
     if (!trimmed) return match;
 
-    // 「。」で分割して、それぞれを<p>タグで囲む
-    // ただし「。」が1つ以下なら分割不要
-    const sentences = trimmed.split(/(?<=。)\s*/);
+    // ブロック要素や画像を含むpタグはそのまま
+    if (/<(img|ul|ol|table|h[1-6]|div|blockquote)/i.test(trimmed)) return match;
+
+    // 「。」で分割（HTMLタグ内の。は無視）
+    const sentences = [];
+    let current = '';
+    let inTag = false;
+
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (ch === '<') inTag = true;
+      if (ch === '>') { inTag = false; current += ch; continue; }
+      current += ch;
+
+      // 。でHTMLタグの外にいる場合に分割
+      if (ch === '。' && !inTag) {
+        sentences.push(current.trim());
+        current = '';
+      }
+    }
+
+    // 残りがあれば追加
+    if (current.trim()) {
+      sentences.push(current.trim());
+    }
+
     if (sentences.length <= 1) return match;
 
     return sentences
-      .map(s => s.trim())
       .filter(s => s.length > 0)
       .map(s => `<p>${s}</p>`)
       .join('\n');
