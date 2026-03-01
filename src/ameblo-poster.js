@@ -367,7 +367,21 @@ function splitSentencesIntoParagraphs(html) {
     return sentences
       .filter(s => s.length > 0)
       .map(s => `<p>${s}</p>`)
-      .join('\n');
+      .join('\n<br />\n');
+  });
+}
+
+/**
+ * 連続する<p>タグ同士の間に<br />がなければ挿入する
+ * ただしh2/h3/img直後のpや、リスト前後のpは除外
+ */
+function ensureLineBreaksBetweenParagraphs(html) {
+  // </p>の直後（空白・改行のみ挟んで）<p>が来る場合、間に<br />を挿入
+  // ただし既に<br />がある場合はスキップ
+  return html.replace(/<\/p>([\s\n\r]*)(<p>)/g, (match, gap, nextP) => {
+    // 既に<br>が含まれていればそのまま
+    if (/\bbr\b/i.test(gap)) return match;
+    return `</p>\n<br />\n${nextP}`;
   });
 }
 
@@ -381,6 +395,9 @@ function buildPostHtml(article, images) {
 
   // 本文を追加（1文1段落に変換）
   html += splitSentencesIntoParagraphs(article.bodyHtml);
+
+  // 連続する段落間に<br />を補完（アメブロで空行を表示するため）
+  html = ensureLineBreaksBetweenParagraphs(html);
 
   // 各h2見出しの直後に図解画像を挿入
   for (const diagram of images.diagramUrls || []) {
