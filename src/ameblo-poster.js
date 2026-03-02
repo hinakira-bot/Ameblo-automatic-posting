@@ -385,6 +385,50 @@ function ensureLineBreaksBetweenParagraphs(html) {
   });
 }
 
+/** メルマガ誘導リンク */
+const MAIL_MAGAZINE_URL = 'https://hinakira.net/p/r/RwKLzKtX';
+
+/** 最初のh2見出し前に挿入するCTA（短め・テキストリンク） */
+function buildTopCta() {
+  return [
+    '<br />',
+    '<p>━━━━━━━━━━━━━━━━━━</p>',
+    '<br />',
+    `<p>📩 AI活用の最新情報を受け取りたい方は <a href="${MAIL_MAGAZINE_URL}">ひなきらのメルマガ（無料）</a> がおすすめです。</p>`,
+    '<br />',
+    '<p>━━━━━━━━━━━━━━━━━━</p>',
+    '<br />',
+  ].join('\n');
+}
+
+/** 記事末尾に挿入するCTA（特典詳細付き） */
+function buildBottomCta() {
+  return [
+    '<br />',
+    '<p>━━━━━━━━━━━━━━━━━━</p>',
+    '<br />',
+    `<p>📩 <strong>ここまで読んでくれたあなたへ</strong></p>`,
+    '<br />',
+    `<p>AIを使いこなすための情報を、メルマガで無料配信しています。</p>`,
+    '<br />',
+    `<p>🎁 <strong>今だけの登録特典つき！</strong></p>`,
+    '<br />',
+    '<ul>',
+    '<li>GPTsの作り方がわかる動画をプレゼント</li>',
+    '<li>有料レベルのAIツールを無料で配布</li>',
+    '<li>登録者限定のオープンチャットへご招待</li>',
+    '</ul>',
+    '<br />',
+    '<p>さらに、最新のプロンプトやAIツールも随時プレゼントしています。</p>',
+    '<br />',
+    '<p>登録しておくだけで「得する」情報が届くので、ぜひチェックしてみてくださいね。</p>',
+    '<br />',
+    `<p>👉 <a href="${MAIL_MAGAZINE_URL}">無料メルマガに登録する</a></p>`,
+    '<br />',
+    '<p>━━━━━━━━━━━━━━━━━━</p>',
+  ].join('\n');
+}
+
 function buildPostHtml(article, images) {
   let html = '';
 
@@ -409,6 +453,17 @@ function buildPostHtml(article, images) {
     );
     html = html.replace(pattern, `$1${imgTag}`);
   }
+
+  // --- メルマガCTA挿入 ---
+  // 1) 最初のh2見出しの直前に挿入
+  const firstH2Match = html.match(/<h2[^>]*>/);
+  if (firstH2Match) {
+    const pos = html.indexOf(firstH2Match[0]);
+    html = html.slice(0, pos) + buildTopCta() + '\n' + html.slice(pos);
+  }
+
+  // 2) 記事の一番最後に挿入
+  html += '\n' + buildBottomCta();
 
   return html;
 }
