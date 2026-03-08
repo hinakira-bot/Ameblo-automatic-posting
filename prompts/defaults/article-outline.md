@@ -30,6 +30,10 @@
 {{latestNews}}
 {{/if}}
 
+{{#if factCheck}}
+{{factCheck}}
+{{/if}}
+
 ## 要件
 - h2見出しは4〜6個
 - 各h2の下にh3を2〜3個

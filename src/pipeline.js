@@ -1,5 +1,5 @@
 import { getNextKeyword, getKeywordById, markAsPosted, markAsFailed } from './keyword-manager.js';
-import { analyzeCompetitors, searchLatestNews } from './competitor-analyzer.js';
+import { analyzeCompetitors, searchLatestNews, verifyFacts } from './competitor-analyzer.js';
 import { generateArticle } from './content-generator.js';
 import { generateAllImages } from './image-generator.js';
 import { postToAmeblo } from './ameblo-poster.js';
@@ -111,13 +111,26 @@ export async function runPipeline(options = {}) {
       onProgress?.({ message: `最新情報: ${newsCount}件取得`, progress: 32 });
     }
 
-    // === STEP 2: 記事生成（description + knowledge + latestNews を渡す） ===
-    onProgress?.({ step: 'content', message: '記事生成中...', progress: 35 });
+    // === STEP 1.7: ファクトチェック ===
+    let factCheck = null;
+    if (keyword && latestNews) {
+      onProgress?.({ step: 'analysis', message: 'ファクトチェック中...', progress: 33 });
+      logger.info('--- STEP 1.7: ファクトチェック ---');
+      factCheck = await verifyFacts(keyword, latestNews);
+      const correctionCount = factCheck?.corrections?.length || 0;
+      const confirmedCount = factCheck?.confirmedFacts?.length || 0;
+      logger.info(`ファクトチェック完了: 修正${correctionCount}件, 確認済み${confirmedCount}件`);
+      onProgress?.({ message: `ファクトチェック完了: 修正${correctionCount}件`, progress: 36 });
+    }
+
+    // === STEP 2: 記事生成（description + knowledge + latestNews + factCheck を渡す） ===
+    onProgress?.({ step: 'content', message: '記事生成中...', progress: 38 });
     logger.info('--- STEP 2: 記事生成 ---');
     const article = await generateArticle(keyword, analysisData, {
       description,
       knowledge,
       latestNews,
+      factCheck,
       mode,
     });
     onProgress?.({ message: `記事生成完了: ${article.title}`, progress: 60, title: article.title });

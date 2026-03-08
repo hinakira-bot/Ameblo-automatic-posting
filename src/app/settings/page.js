@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 const FREQUENCY_OPTIONS = [
   { value: 'daily1', label: '毎日1回' },
   { value: 'daily2', label: '毎日2回' },
+  { value: 'daily3', label: '毎日3回' },
   { value: 'weekday', label: '平日のみ' },
 ];
 
@@ -53,6 +54,7 @@ export default function SettingsPage() {
   const [frequency, setFrequency] = useState('daily1');
   const [time1, setTime1] = useState('9:00');
   const [time2, setTime2] = useState('15:00');
+  const [time3, setTime3] = useState('20:00');
 
   // 対話型セッション用
   const [sessionState, setSessionState] = useState({
@@ -257,6 +259,7 @@ export default function SettingsPage() {
       setFrequency(parsed.frequency);
       setTime1(parsed.time1);
       setTime2(parsed.time2);
+      if (parsed.time3) setTime3(parsed.time3);
     } catch (err) {
       console.error('設定取得エラー:', err);
     } finally {
@@ -401,7 +404,7 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage('');
 
-    const cron = buildCronSimple({ frequency, time1, time2 });
+    const cron = buildCronSimple({ frequency, time1, time2, time3 });
     const updates = {
       'article.minLength': settings.article.minLength,
       'article.maxLength': settings.article.maxLength,
@@ -455,7 +458,7 @@ export default function SettingsPage() {
     return <div className="text-center text-gray-500 py-12">読み込み中...</div>;
   }
 
-  const cronDescription = describeCronSimple({ frequency, time1, time2 });
+  const cronDescription = describeCronSimple({ frequency, time1, time2, time3 });
 
   return (
     <div className="max-w-2xl">
@@ -806,11 +809,25 @@ export default function SettingsPage() {
             </select>
           </Field>
 
-          {frequency === 'daily2' && (
+          {(frequency === 'daily2' || frequency === 'daily3') && (
             <Field label="2回目の時刻">
               <select
                 value={time2}
                 onChange={(e) => setTime2(e.target.value)}
+                className="input-field"
+              >
+                {TIME_OPTIONS.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+
+          {frequency === 'daily3' && (
+            <Field label="3回目の時刻">
+              <select
+                value={time3}
+                onChange={(e) => setTime3(e.target.value)}
                 className="input-field"
               >
                 {TIME_OPTIONS.map((t) => (
@@ -1007,9 +1024,21 @@ function formatTime(hour, minute) {
   return `${hour}:${String(minute).padStart(2, '0')}`;
 }
 
-function buildCronSimple({ frequency, time1, time2 }) {
+function buildCronSimple({ frequency, time1, time2, time3 }) {
   const t1 = parseTime(time1);
   switch (frequency) {
+    case 'daily3': {
+      const t2 = parseTime(time2);
+      const t3 = parseTime(time3);
+      const times = [t1, t2, t3].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+      // 全て同じ分の場合: 時間をカンマ区切り
+      if (times[0].minute === times[1].minute && times[1].minute === times[2].minute) {
+        const hours = times.map(t => t.hour).join(',');
+        return `${times[0].minute} ${hours} * * *`;
+      }
+      // それ以外: セミコロン区切りで3つのcronエントリ
+      return times.map(t => `${t.minute} ${t.hour} * * *`).join(';');
+    }
     case 'daily2': {
       const t2 = parseTime(time2);
       // 2つの時刻が同じ時間帯の場合は分をカンマ区切り、違う場合は別々のcron
@@ -1022,15 +1051,9 @@ function buildCronSimple({ frequency, time1, time2 }) {
         const hours = [t1.hour, t2.hour].sort((a, b) => a - b).join(',');
         return `${t1.minute} ${hours} * * *`;
       }
-      // 分も時間も異なる場合: 2つのcronをセミコロンで区切って保存はできないので
-      // node-cron対応の形式で保存
+      // 分も時間も異なる場合: セミコロン区切りで2つのcronエントリ
       const sorted = [t1, t2].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
-      return `${sorted[0].minute} ${sorted[0].hour},${sorted[1].minute} ${sorted[1].hour} * * *`
-        // ↑ これは無効なcron。代わりに2エントリ方式にする
-        .replace(/.*/, () => {
-          // 2つの独立したcronエントリを ; で区切る（scheduler.js で対応）
-          return `${sorted[0].minute} ${sorted[0].hour} * * *;${sorted[1].minute} ${sorted[1].hour} * * *`;
-        });
+      return `${sorted[0].minute} ${sorted[0].hour} * * *;${sorted[1].minute} ${sorted[1].hour} * * *`;
     }
     case 'weekday':
       return `${t1.minute} ${t1.hour} * * 1-5`;
@@ -1040,18 +1063,24 @@ function buildCronSimple({ frequency, time1, time2 }) {
 }
 
 function parseCronSimple(cron) {
-  const defaultResult = { frequency: 'daily1', time1: '9:00', time2: '15:00' };
+  const defaultResult = { frequency: 'daily1', time1: '9:00', time2: '15:00', time3: '20:00' };
   if (!cron) return defaultResult;
 
-  // セミコロン区切り（daily2で分が異なる場合）
+  // セミコロン区切り（daily2/daily3で分が異なる場合）
   if (cron.includes(';')) {
-    const [c1, c2] = cron.split(';').map(s => s.trim());
-    const p1 = c1.split(' ');
-    const p2 = c2.split(' ');
-    if (p1.length === 5 && p2.length === 5) {
-      const t1 = formatTime(Number(p1[1]), Number(p1[0]));
-      const t2 = formatTime(Number(p2[1]), Number(p2[0]));
-      return { frequency: 'daily2', time1: t1, time2: t2 };
+    const cronParts = cron.split(';').map(s => s.trim());
+    const times = [];
+    for (const c of cronParts) {
+      const p = c.split(' ');
+      if (p.length === 5) {
+        times.push(formatTime(Number(p[1]), Number(p[0])));
+      }
+    }
+    if (times.length === 3) {
+      return { frequency: 'daily3', time1: times[0], time2: times[1], time3: times[2] };
+    }
+    if (times.length === 2) {
+      return { frequency: 'daily2', time1: times[0], time2: times[1], time3: '20:00' };
     }
     return defaultResult;
   }
@@ -1064,15 +1093,26 @@ function parseCronSimple(cron) {
   const mins = minStr.split(',').map(Number);
 
   if (dow === '1-5') {
-    return { frequency: 'weekday', time1: formatTime(hours[0] || 9, mins[0] || 0), time2: '15:00' };
+    return { frequency: 'weekday', time1: formatTime(hours[0] || 9, mins[0] || 0), time2: '15:00', time3: '20:00' };
   }
 
-  if (hours.length > 1) {
+  if (hours.length >= 3) {
+    // daily3: 同じ分で3つの時間
+    return {
+      frequency: 'daily3',
+      time1: formatTime(hours[0], mins[0] || 0),
+      time2: formatTime(hours[1], mins[0] || 0),
+      time3: formatTime(hours[2], mins[0] || 0),
+    };
+  }
+
+  if (hours.length === 2) {
     // daily2: 同じ分で複数時間
     return {
       frequency: 'daily2',
       time1: formatTime(hours[0], mins[0] || 0),
       time2: formatTime(hours[1], mins[mins.length > 1 ? 1 : 0] || 0),
+      time3: '20:00',
     };
   }
 
@@ -1082,14 +1122,17 @@ function parseCronSimple(cron) {
       frequency: 'daily2',
       time1: formatTime(hours[0], mins[0]),
       time2: formatTime(hours[0], mins[1]),
+      time3: '20:00',
     };
   }
 
-  return { frequency: 'daily1', time1: formatTime(hours[0] || 9, mins[0] || 0), time2: '15:00' };
+  return { frequency: 'daily1', time1: formatTime(hours[0] || 9, mins[0] || 0), time2: '15:00', time3: '20:00' };
 }
 
-function describeCronSimple({ frequency, time1, time2 }) {
+function describeCronSimple({ frequency, time1, time2, time3 }) {
   switch (frequency) {
+    case 'daily3':
+      return `毎日 ${time1} と ${time2} と ${time3} に自動投稿`;
     case 'daily2':
       return `毎日 ${time1} と ${time2} に自動投稿`;
     case 'weekday':
