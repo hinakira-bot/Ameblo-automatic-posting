@@ -19,6 +19,10 @@
 {{knowledge}}
 {{/if}}
 
+{{#if factCheck}}
+{{factCheck}}
+{{/if}}
+
 ## 出力フォーマット (JSON)
 以下のJSON形式で出力してください。JSON以外のテキストは不要です。
 {
