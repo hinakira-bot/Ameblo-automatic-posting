@@ -441,6 +441,19 @@ function buildBottomCta() {
   ].join('\n');
 }
 
+/**
+ * AIがMarkdown記法を混在させた場合にHTMLへ変換する
+ */
+function convertMarkdownToHtml(html) {
+  // ### 見出し → <h3>
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  // ## 見出し → <h2>
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  // **太字** → <strong>（HTMLタグ内は除く）
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return html;
+}
+
 function buildPostHtml(article, images) {
   let html = '';
 
@@ -449,8 +462,11 @@ function buildPostHtml(article, images) {
     html += `<p><img src="${images.eyecatchUrl}" alt="${article.title}" /></p>\n`;
   }
 
+  // Markdown記法が混在していたらHTMLに変換
+  let bodyHtml = convertMarkdownToHtml(article.bodyHtml);
+
   // 本文を追加（極端に長い段落のみ分割）
-  html += splitLongParagraphs(article.bodyHtml);
+  html += splitLongParagraphs(bodyHtml);
 
   // 連続する段落間に<br />を補完（アメブロで空行を表示するため）
   html = ensureLineBreaksBetweenParagraphs(html);
