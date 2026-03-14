@@ -20,7 +20,7 @@ async function analyzeSearchIntent(keyword, analysisData, baseVars) {
   });
 
   const result = await textModel.generateContent(prompt);
-  const text = result.response.text();
+  const text = extractResponseText(result.response);
   return parseJSON(text);
 }
 
@@ -38,7 +38,7 @@ async function generateOutline(keyword, analysisData, searchIntent, baseVars) {
   });
 
   const result = await textModel.generateContent(prompt);
-  const text = result.response.text();
+  const text = extractResponseText(result.response);
   return parseJSON(text);
 }
 
@@ -58,7 +58,7 @@ async function generateTitle(keyword, outline, searchIntent, baseVars) {
   });
 
   const result = await textModel.generateContent(prompt);
-  const text = result.response.text();
+  const text = extractResponseText(result.response);
   return parseJSON(text);
 }
 
@@ -85,7 +85,7 @@ async function generateBody(keyword, title, outline, searchIntent, baseVars) {
   });
 
   const result = await textModel.generateContent(prompt);
-  return result.response.text().replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+  return extractResponseText(result.response).replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
 }
 
 /**
@@ -146,6 +146,30 @@ export async function generateArticle(keyword, analysisData, context = {}) {
     bodyHtml,
     searchIntent,
   };
+}
+
+/**
+ * Gemini レスポンスからthinking（思考）パートを除外してテキスト部分のみ取得
+ * gemini-3-flash-preview 等はthinkingをデフォルトで出力する
+ */
+function extractResponseText(response) {
+  const candidate = response.candidates?.[0];
+  if (!candidate?.content?.parts) {
+    // フォールバック: 従来の .text() を使用
+    return response.text();
+  }
+
+  // thought=true のパートを除外し、テキストパートのみ結合
+  const textParts = candidate.content.parts
+    .filter(part => !part.thought && part.text)
+    .map(part => part.text);
+
+  if (textParts.length > 0) {
+    return textParts.join('');
+  }
+
+  // テキストパートがなければフォールバック
+  return response.text();
 }
 
 /** JSONパーサー（コードブロック対応） */
