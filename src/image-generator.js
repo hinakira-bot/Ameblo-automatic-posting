@@ -219,8 +219,42 @@ export async function generateDiagrams(outline, outputDir, keyword) {
 }
 
 /**
+ * まとめセクション用の図解画像を1枚生成
+ */
+async function generateSummaryDiagram(article, outputDir) {
+  const outputPath = resolve(outputDir, 'summary-diagram.png');
+
+  // まとめセクションのインデックスを探す
+  const matomeIndex = article.outline.findIndex(s => s.h2.includes('まとめ'));
+  if (matomeIndex === -1) return null;
+
+  const prompt = [
+    `Create a clean, simple summary infographic for a Japanese blog article.`,
+    `Topic: "${article.keyword}"`,
+    `Title: "${article.title}"`,
+    ``,
+    `Requirements:`,
+    `- Simple, clean design with 3-4 key points visualized`,
+    `- Use icons, minimal text, and soft colors`,
+    `- Light background (white or pastel)`,
+    `- Japanese text labels for key points`,
+    `- Easy to understand at a glance on mobile`,
+    `- 16:9 aspect ratio`,
+    `- Style: friendly, approachable, not corporate`,
+  ].join('\n');
+
+  const refImages = loadReferenceImages('diagram');
+  const imagePath = await generateImage(prompt, outputPath, refImages);
+
+  if (imagePath) {
+    return { index: matomeIndex, h2: article.outline[matomeIndex].h2, imagePath };
+  }
+  return null;
+}
+
+/**
  * 全画像を一括生成
- * メルマガ型記事ではアイキャッチのみ生成（図解は不要）
+ * アイキャッチ + まとめ用図解1枚のみ
  */
 export async function generateAllImages(article) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -232,12 +266,16 @@ export async function generateAllImages(article) {
   // アイキャッチ生成
   const eyecatchPath = await generateEyecatch(article.keyword, article.title, outputDir);
 
-  // 図解はスキップ（メルマガ型記事では不要）
+  // まとめ用図解1枚のみ生成
   const diagrams = [];
-  logger.info('図解生成: スキップ（メルマガ型）');
+  const summaryDiagram = await generateSummaryDiagram(article, outputDir);
+  if (summaryDiagram) {
+    diagrams.push(summaryDiagram);
+    logger.info('まとめ図解: 生成完了');
+  }
 
   logger.info(
-    `画像生成完了 - アイキャッチ: ${eyecatchPath ? 'OK' : 'NG'}`
+    `画像生成完了 - アイキャッチ: ${eyecatchPath ? 'OK' : 'NG'}, まとめ図解: ${summaryDiagram ? 'OK' : 'NG'}`
   );
 
   return { eyecatchPath, diagrams, outputDir };
