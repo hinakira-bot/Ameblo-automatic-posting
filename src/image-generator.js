@@ -220,6 +220,7 @@ export async function generateDiagrams(outline, outputDir, keyword) {
 
 /**
  * 全画像を一括生成
+ * メルマガ型記事ではアイキャッチのみ生成（図解は不要）
  */
 export async function generateAllImages(article) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -231,12 +232,12 @@ export async function generateAllImages(article) {
   // アイキャッチ生成
   const eyecatchPath = await generateEyecatch(article.keyword, article.title, outputDir);
 
-  // 図解生成（キーワードを渡してハウツー判定）
-  const diagrams = await generateDiagrams(article.outline, outputDir, article.keyword);
+  // 図解はスキップ（メルマガ型記事では不要）
+  const diagrams = [];
+  logger.info('図解生成: スキップ（メルマガ型）');
 
-  const successCount = diagrams.filter((d) => d.imagePath).length;
   logger.info(
-    `画像生成完了 - アイキャッチ: ${eyecatchPath ? 'OK' : 'NG'}, 図解: ${successCount}/${diagrams.length}枚`
+    `画像生成完了 - アイキャッチ: ${eyecatchPath ? 'OK' : 'NG'}`
   );
 
   return { eyecatchPath, diagrams, outputDir };

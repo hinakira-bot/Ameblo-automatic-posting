@@ -471,17 +471,6 @@ function buildPostHtml(article, images) {
   // 連続する段落間に<br />を補完（アメブロで空行を表示するため）
   html = ensureLineBreaksBetweenParagraphs(html);
 
-  // 各h2見出しの直後に図解画像を挿入
-  for (const diagram of images.diagramUrls || []) {
-    if (!diagram.url) continue;
-    const imgTag = `\n<p><img src="${diagram.url}" alt="${diagram.h2}" /></p>`;
-    const pattern = new RegExp(
-      `(<h2[^>]*id="heading-${diagram.index}"[^>]*>.*?</h2>)`,
-      's'
-    );
-    html = html.replace(pattern, `$1${imgTag}`);
-  }
-
   // --- メルマガCTA挿入 ---
   // 1) 最初のh2見出しの直前に挿入
   const firstH2Match = html.match(/<h2[^>]*>/);
