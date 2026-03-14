@@ -114,7 +114,7 @@ async function login(context) {
 
     // ログインが必要 → 認証ページへ直接アクセス
     logger.info('アメブロにログイン中...');
-    await page.goto(LOGIN_URL, { waitUntil: 'networkidle', timeout: 60000 });
+    await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
     await page.waitForTimeout(2000);
 
     // ログイン済みの場合（/homeやブログページにリダイレクトされた）
@@ -503,11 +503,11 @@ export async function postToAmeblo(article, imageFiles) {
     await login(context);
 
     const page = await context.newPage();
-    await page.goto(EDITOR_URL, { waitUntil: 'networkidle', timeout: 60000 });
-    await page.waitForTimeout(3000);
+    await page.goto(EDITOR_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForTimeout(5000);
 
     // CKEditorの読み込みを待つ
-    await page.waitForSelector('#cke_amebloeditor', { timeout: 15000 });
+    await page.waitForSelector('#cke_amebloeditor', { timeout: 30000 });
     logger.info('エディタの読み込み完了');
 
     // モーダルダイアログが表示されていたら閉じる（エディタ更新通知など）
