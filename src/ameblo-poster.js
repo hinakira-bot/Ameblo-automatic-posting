@@ -327,11 +327,11 @@ async function setCoverImage(page) {
  * 画像付きHTMLを組み立て
  */
 /**
- * <p>タグ内の複数文を1文ずつ別の<p>タグに分割する
- * AIが1つの<p>に複数文を入れてしまった場合の保険処理
- * <strong>等のインラインHTMLタグを含む段落にも対応
+ * <p>タグ内が極端に長い場合（5文以上）のみ分割する安全弁
+ * アメブロ向けに1〜3文の自然な段落リズムを保つため、
+ * 通常の段落はAI生成のままにする
  */
-function splitSentencesIntoParagraphs(html) {
+function splitLongParagraphs(html) {
   return html.replace(/<p>([\s\S]*?)<\/p>/g, (match, content) => {
     const trimmed = content.trim();
     if (!trimmed) return match;
@@ -339,10 +339,23 @@ function splitSentencesIntoParagraphs(html) {
     // ブロック要素や画像を含むpタグはそのまま
     if (/<(img|ul|ol|table|h[1-6]|div|blockquote)/i.test(trimmed)) return match;
 
-    // 「。」で分割（HTMLタグ内の。は無視）
+    // 文の数をカウント（HTMLタグ外の「。」）
+    let count = 0;
+    let inTag = false;
+    for (let i = 0; i < trimmed.length; i++) {
+      if (trimmed[i] === '<') inTag = true;
+      if (trimmed[i] === '>') { inTag = false; continue; }
+      if (trimmed[i] === '。' && !inTag) count++;
+    }
+
+    // 4文以下ならそのまま（自然なリズム）
+    if (count <= 4) return match;
+
+    // 5文以上なら2〜3文ずつのグループに分割
     const sentences = [];
     let current = '';
-    let inTag = false;
+    let sentenceCount = 0;
+    inTag = false;
 
     for (let i = 0; i < trimmed.length; i++) {
       const ch = trimmed[i];
@@ -350,18 +363,17 @@ function splitSentencesIntoParagraphs(html) {
       if (ch === '>') { inTag = false; current += ch; continue; }
       current += ch;
 
-      // 。でHTMLタグの外にいる場合に分割
       if (ch === '。' && !inTag) {
-        sentences.push(current.trim());
-        current = '';
+        sentenceCount++;
+        // 2〜3文ごとに段落を切る
+        if (sentenceCount >= 2 + (sentences.length % 2)) {
+          sentences.push(current.trim());
+          current = '';
+          sentenceCount = 0;
+        }
       }
     }
-
-    // 残りがあれば追加
-    if (current.trim()) {
-      sentences.push(current.trim());
-    }
-
+    if (current.trim()) sentences.push(current.trim());
     if (sentences.length <= 1) return match;
 
     return sentences
@@ -437,8 +449,8 @@ function buildPostHtml(article, images) {
     html += `<p><img src="${images.eyecatchUrl}" alt="${article.title}" /></p>\n`;
   }
 
-  // 本文を追加（1文1段落に変換）
-  html += splitSentencesIntoParagraphs(article.bodyHtml);
+  // 本文を追加（極端に長い段落のみ分割）
+  html += splitLongParagraphs(article.bodyHtml);
 
   // 連続する段落間に<br />を補完（アメブロで空行を表示するため）
   html = ensureLineBreaksBetweenParagraphs(html);

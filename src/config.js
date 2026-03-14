@@ -50,7 +50,7 @@ const config = {
     cronSchedule: getEnv('CRON_SCHEDULE', '0 9 * * *'),
     category: getEnv('POST_CATEGORY', ''),
     minLength: parseInt(getEnv('ARTICLE_MIN_LENGTH', '2000'), 10),
-    maxLength: parseInt(getEnv('ARTICLE_MAX_LENGTH', '4000'), 10),
+    maxLength: parseInt(getEnv('ARTICLE_MAX_LENGTH', '3500'), 10),
   },
   dryRun: getEnv('DRY_RUN') === 'true',
   logLevel: getEnv('LOG_LEVEL', 'info'),

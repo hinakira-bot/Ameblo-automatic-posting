@@ -7,7 +7,7 @@ const SETTINGS_PATH = config.paths.settings;
 const DEFAULT_SETTINGS = {
   article: {
     minLength: 2000,
-    maxLength: 4000,
+    maxLength: 3500,
     defaultCategory: '',
   },
   knowledge: {
