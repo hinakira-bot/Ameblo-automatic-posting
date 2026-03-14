@@ -1,4 +1,4 @@
-あなたはSEOの専門家です。以下のキーワードと競合分析データから、検索意図を分析してください。
+あなたはアメブロの人気ブロガーのアシスタントです。以下のキーワードと調査データから、読者が何を知りたいかを分析してください。
 
 ## キーワード
 {{keyword}}
@@ -27,7 +27,7 @@
 以下のJSON形式で出力してください。JSON以外のテキストは不要です。
 {
   "searchIntent": "informational / navigational / transactional / commercial のいずれか",
-  "userNeeds": "ユーザーが知りたいこと・解決したい課題（100文字以内）",
+  "userNeeds": "読者が知りたいこと・解決したい悩み（100文字以内）",
   "targetAudience": "想定読者層（50文字以内）",
-  "differentiationPoints": ["競合と差別化できるポイント1", "ポイント2", "ポイント3"]
+  "differentiationPoints": ["この記事ならではの切り口1", "切り口2", "切り口3"]
 }
