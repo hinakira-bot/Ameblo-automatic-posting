@@ -400,13 +400,13 @@ function ensureLineBreaksBetweenParagraphs(html) {
 /** メルマガ誘導リンク */
 const MAIL_MAGAZINE_URL = 'https://hinakira.net/p/r/RwKLzKtX';
 
-/** 最初のh2見出し前に挿入するCTA（短め・テキストリンク） */
+/** 最初のh2見出し前に挿入するCTA（短め・テキストリンク＋特典軽く） */
 function buildTopCta() {
   return [
     '<br />',
     '<p>━━━━━━━━━━━━━━━━━━</p>',
     '<br />',
-    `<p>📩 AI活用の最新情報を受け取りたい方は <a href="${MAIL_MAGAZINE_URL}">ひなきらのメルマガ（無料）</a> がおすすめです。</p>`,
+    `<p>📩 GPTs動画・図解作成ツールなど<strong>無料特典つき</strong>！ <a href="${MAIL_MAGAZINE_URL}">ひなきらのAIメルマガはこちら</a></p>`,
     '<br />',
     '<p>━━━━━━━━━━━━━━━━━━</p>',
     '<br />',
